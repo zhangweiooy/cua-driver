@@ -935,10 +935,14 @@ struct EffectFrame {
     squish: f64,
 }
 
-/// Effect colour: the session tint lifted toward white.
+/// Effect colour: the session tint lifted toward the palest indigo.
 fn effect_rgb(tint: [u8; 4]) -> (u8, u8, u8) {
-    let lift = |c: u8| (f64::from(c) + (255.0 - f64::from(c)) * 0.45).round() as u8;
-    (lift(tint[0]), lift(tint[1]), lift(tint[2]))
+    let lift = |c: u8, pale: u8| (f64::from(c) * 0.55 + f64::from(pale) * 0.45).round() as u8;
+    (
+        lift(tint[0], 0xe0),
+        lift(tint[1], 0xe7),
+        lift(tint[2], 0xff),
+    )
 }
 
 fn effect_paint(rgb: (u8, u8, u8), alpha: f64) -> tiny_skia::Paint<'static> {
@@ -1183,15 +1187,14 @@ pub fn paint_cursor(
     let alpha_scale = core.idle_alpha as f32;
 
     // --- Focus rect highlight (macOS only — others pass None) ---
-    // Cyan glow border + faint fill, matching Swift AgentCursor.showFocusRect.
+    // Theme accent border and faint fill.
     if let Some(fr) = focus_rect {
         let [fx, fy, fw, fh] = fr.rect;
         let t = fr.t as f32;
         let fade = (1.0 - t) * (1.0 - t); // quadratic ease-out
         let border_a = (230.0 * fade * alpha_scale) as u8;
         let fill_a = (20.0 * fade * alpha_scale) as u8;
-        // Cyan: #5EC0E8
-        let (cr, cg, cb) = (0x5Eu8, 0xC0u8, 0xE8u8);
+        let [cr, cg, cb, _] = crate::theme::DEFAULT_CURSOR_FILL;
 
         if let Some(rect) = tiny_skia::Rect::from_xywh(
             (fx * s) as f32,

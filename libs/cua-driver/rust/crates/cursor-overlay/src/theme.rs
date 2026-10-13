@@ -19,24 +19,20 @@ pub const CANVAS_SIZE: f32 = 128.0;
 pub const DISPLAY_SIZE: f32 = 42.0;
 const FLOAT_DURATION_SECS: f32 = 4.0;
 
-pub const DEFAULT_CURSOR_FILL: [u8; 4] = [94, 192, 232, 255];
+pub const DEFAULT_CURSOR_FILL: [u8; 4] = [0x63, 0x66, 0xf1, 255];
 
 const SESSION_CURSOR_FILLS: &[[u8; 4]] = &[
-    [178, 132, 255, 255],
-    [247, 132, 170, 255],
-    [96, 218, 174, 255],
-    [244, 178, 66, 255],
-    [76, 204, 224, 255],
-    [221, 113, 236, 255],
-    [232, 82, 98, 255],
-    [184, 220, 54, 255],
-    [80, 126, 236, 255],
+    [0x4f, 0x46, 0xe5, 255],
+    [0x81, 0x8c, 0xf8, 255],
+    [0xa5, 0xb4, 0xfc, 255],
+    [0xc7, 0xd2, 0xfe, 255],
+    [0xe0, 0xe7, 0xff, 255],
 ];
 
 /// Return the stable fill color for one session-owned cursor.
 ///
-/// The anonymous/default cursor keeps the original Cua blue. Named sessions
-/// hash into the former multi-cursor palette so concurrent runs are visually
+/// The anonymous/default cursor uses soft indigo. Named sessions
+/// hash into the indigo scale so concurrent runs are visually
 /// distinct without accepting an agent-controlled styling argument.
 pub fn session_fill_rgba(session_id: &str) -> [u8; 4] {
     if session_id.is_empty() || session_id == "default" {
@@ -254,9 +250,9 @@ mod tests {
     }
 
     #[test]
-    fn default_cursor_keeps_original_blue_fill() {
+    fn default_cursor_uses_soft_indigo_fill() {
         assert_eq!(session_fill_rgba("default"), DEFAULT_CURSOR_FILL);
-        assert_eq!(session_fill_hex("default"), "#5EC0E8");
+        assert_eq!(session_fill_hex("default"), "#6366F1");
     }
 
     #[test]
@@ -267,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn default_cursor_uses_parameterized_fill_white_ink_and_matching_glow() {
+    fn default_cursor_uses_parameterized_fill_pale_ink_and_indigo_glow() {
         let mut pixmap = tiny_skia::Pixmap::new(256, 256).unwrap();
         paint_default_theme_with_fill(
             &mut pixmap,
@@ -282,7 +278,7 @@ mod tests {
 
         let pixels = pixmap.data().chunks_exact(4).collect::<Vec<_>>();
         assert!(pixels.iter().any(|pixel| *pixel == [12, 34, 56, 255]));
-        assert!(pixels.iter().any(|pixel| *pixel == [255, 255, 255, 255]));
+        assert!(pixels.iter().any(|pixel| *pixel == [0xe0, 0xe7, 0xff, 255]));
         assert!(pixels.iter().any(|pixel| pixel[2] > pixel[1]
             && pixel[1] > pixel[0]
             && pixel[0] > 0

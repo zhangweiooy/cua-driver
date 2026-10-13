@@ -25,7 +25,10 @@ The Python generator uses only the standard library and writes deterministic
 ZIP metadata and entry ordering. A Rust test verifies that the source hash
 inside the compiled artifact matches the checked-in `.lottie` bytes.
 
-The source uses Cua blue as a palette key and white for outlines. At runtime,
+The source uses soft indigo `#6366f1` as a palette key, `#818cf8` glow,
+and `#4f46e5` / `#e0e7ff` outlines for contrast on light and dark backgrounds.
+Session colors use the indigo scale `#4f46e5`, `#6366f1`, `#818cf8`,
+`#a5b4fc`, `#c7d2fe`, `#e0e7ff`. At runtime,
 only the embedded default is recolored to the stable session fill. Installed
 custom themes retain their authored colors. The shared floating motion is
 applied to the selected action animation. Delivery and target context is

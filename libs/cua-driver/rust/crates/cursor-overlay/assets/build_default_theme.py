@@ -8,7 +8,7 @@ archive without a LottieFiles account or a browser editor.
 
 The runtime applies two bounded effects after decoding the compiled theme:
 
-* the approved blue tint key is replaced with the stable session color;
+* the approved indigo tint key is replaced with the stable session color;
 * the shared four-second float transform is applied to the composed theme.
 
 Those effects are runtime concerns because they must stay synchronized across
@@ -25,8 +25,10 @@ from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 CANVAS = 128
 FPS = 30
-BLUE = [94 / 255, 192 / 255, 232 / 255, 1]
-WHITE = [1, 1, 1, 1]
+INDIGO = [0x63 / 255, 0x66 / 255, 0xF1 / 255, 1]
+DARK = [0x4F / 255, 0x46 / 255, 0xE5 / 255, 1]
+GLOW = [0x81 / 255, 0x8C / 255, 0xF8 / 255, 1]
+PALE = [0xE0 / 255, 0xE7 / 255, 1, 1]
 TRANSPARENT = [0, 0, 0, 0]
 
 Point = tuple[float, float]
@@ -236,7 +238,7 @@ def cursor_layers(
             shape_layer(
                 index,
                 f"Cursor glow {width}",
-                [CURSOR_PATH, stroke(BLUE, width, opacity)],
+                [CURSOR_PATH, stroke(GLOW, width, opacity)],
                 frames,
                 position=position,
                 scale=scale,
@@ -247,7 +249,7 @@ def cursor_layers(
         shape_layer(
             index,
             "Cursor body",
-            [CURSOR_PATH, fill(BLUE), stroke(WHITE, 5)],
+            [CURSOR_PATH, fill(INDIGO), stroke(DARK, 7), stroke(PALE, 3)],
             frames,
             position=position,
             scale=scale,
@@ -275,7 +277,7 @@ def cue_layers(
             shape_layer(
                 index,
                 f"{name} glow {expansion}",
-                [*geometry, stroke(BLUE, width + expansion, glow_opacity)],
+                [*geometry, stroke(GLOW, width + expansion, glow_opacity)],
                 frames,
                 position=position,
                 scale=scale,
@@ -288,7 +290,7 @@ def cue_layers(
         shape_layer(
             index,
             f"{name} outline",
-            [*geometry, stroke(WHITE, width + 1.5)],
+            [*geometry, stroke(DARK, width + 3.5), stroke(PALE, width + 1.5)],
             frames,
             position=position,
             scale=scale,
@@ -301,7 +303,7 @@ def cue_layers(
         shape_layer(
             index,
             f"{name} color",
-            [*geometry, stroke(BLUE, max(width - 1, 1.5))],
+            [*geometry, stroke(INDIGO, max(width - 1, 1.5))],
             frames,
             position=position,
             scale=scale,
@@ -540,7 +542,7 @@ def action_record() -> dict[str, Any]:
         shape_layer(
             30,
             "Record dot outline",
-            [*dot_geometry, fill(BLUE), stroke(WHITE, 3)],
+            [*dot_geometry, fill(INDIGO), stroke(PALE, 3)],
             frames,
             position=static([52, 64]),
             scale=dot_scale,
