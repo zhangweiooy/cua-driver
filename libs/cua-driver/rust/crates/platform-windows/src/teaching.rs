@@ -1229,8 +1229,7 @@ mod tests {
             std::env::var_os("CUA_TEACHING_TEST_BUNDLE").expect("test requires the built bundle"),
         );
         let manifest: Value =
-            serde_json::from_slice(&std::fs::read(root.join("cua-package.json")).unwrap())
-                .unwrap();
+            serde_json::from_slice(&std::fs::read(root.join("cua-package.json")).unwrap()).unwrap();
         let version = manifest["product_version"].as_str().unwrap();
         let mut config = PerceptionWorkerConfig::installed_with_identity(
             root.join("perception/cua-perception.exe"),

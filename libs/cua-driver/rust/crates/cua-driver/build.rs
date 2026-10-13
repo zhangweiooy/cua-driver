@@ -13,7 +13,10 @@
 
 fn main() {
     embed_git_sha();
-    println!("cargo:rustc-env=CUA_PRODUCT_TARGET={}", std::env::var("TARGET").expect("Cargo target"));
+    println!(
+        "cargo:rustc-env=CUA_PRODUCT_TARGET={}",
+        std::env::var("TARGET").expect("Cargo target")
+    );
     println!("cargo:rerun-if-env-changed=CUA_DRIVER_REVIEW_EXTENSION_PUBLIC_KEY_BASE64");
     validate_review_trust_root_build();
 

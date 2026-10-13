@@ -10,6 +10,7 @@ the installed product contains native binaries, models, runtime libraries and no
 - [macOS build, permissions and native acceptance](macos/README.md)
 - [Baseline and downstream integration points](BASELINE.md)
 - [Upgrade checklist](UPGRADING.md)
+- [Sharedization verification and remaining native gaps](SHAREDIZATION-VERIFICATION.md)
 - [Model provenance](MODEL_SOURCES.md) and [corresponding source](SOURCE_OFFER.md)
 
 `upstream.lock.json` is the authority for component release tags, commits,
