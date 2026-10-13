@@ -615,7 +615,7 @@ impl Backend for MacosBackend {
             png: encoded.into_inner(),
             width: crop.width(),
             height: crop.height(),
-            detail: json!({"status":"captured","capture_backend":"upstream_window_capture","capture_started_at_epoch_ms":started,"capture_finished_at_epoch_ms":finished,"source_event_age_ms":started.saturating_sub(raw.at),"geometry":{"coordinate_space":"screen_points","crop":proof.rect,"window_frame":[bounds.x,bounds.y,bounds.width,bounds.height],"width":crop.width(),"height":crop.height()},"privacy":"target_control_verified_before_and_after","trigger":trigger}),
+            detail: json!({"status":"captured","capture_backend":"upstream_window_capture","capture_started_at_epoch_ms":started,"capture_finished_at_epoch_ms":finished,"source_event_age_ms":started.saturating_sub(raw.at),"geometry":{"coordinate_space":"screen_points","crop":[x,y,x+width,y+height],"window_frame":[bounds.x,bounds.y,bounds.x+bounds.width,bounds.y+bounds.height],"width":crop.width(),"height":crop.height()},"privacy":"target_control_verified_before_and_after","trigger":trigger}),
         })
     }
 }
