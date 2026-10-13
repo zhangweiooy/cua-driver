@@ -438,7 +438,10 @@ impl Backend for MacosBackend {
                                 let dx = event.get_integer_value_field(
                                     EventField::SCROLL_WHEEL_EVENT_DELTA_AXIS_2,
                                 ) as i32;
-                                for (delta, horizontal) in [(dy, false), (dx, true)] {
+                                // Match the retained teaching wheel convention: positive X right, Y up.
+                                for (delta, horizontal) in
+                                    [(dy, false), (dx.saturating_neg(), true)]
+                                {
                                     if delta != 0 {
                                         send(Kind::Scroll(
                                             x,
