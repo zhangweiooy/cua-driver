@@ -21,6 +21,7 @@ mod desktop;
 mod inputs;
 mod outputs;
 mod session;
+pub mod teaching;
 mod verification;
 mod visual;
 mod windows;

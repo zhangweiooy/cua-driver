@@ -18,6 +18,9 @@
 /// back to `%USERPROFILE%` (Windows, where `HOME` is usually unset). Returns
 /// `None` when neither is set (sandboxed CI).
 pub fn default_config_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("CUA_DRIVER_CONFIG_PATH").filter(|p| !p.is_empty()) {
+        return Some(path.into());
+    }
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(|h| {

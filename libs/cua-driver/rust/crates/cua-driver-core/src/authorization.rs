@@ -228,6 +228,9 @@ const EXISTING_PROFILE_REVOCATION: &[&str] = &[
 ];
 
 const PRIVATE_OBSERVATION_OPERATIONS: &[&str] = &[
+    "start_teaching",
+    "get_teaching_state",
+    "stop_teaching",
     "get_desktop_state",
     "get_accessibility_tree",
     "get_window_state",
@@ -736,7 +739,10 @@ pub fn enforcement_adapters_for_call(
 
     if matches!(
         tool,
-        "get_desktop_state"
+        "start_teaching"
+            | "get_teaching_state"
+            | "stop_teaching"
+            | "get_desktop_state"
             | "get_accessibility_tree"
             | "get_window_state"
             | "verify_state"
@@ -779,6 +785,7 @@ pub fn enforcement_adapters_for_call(
         tool,
         "browser_set_input_files"
             | "browser_download"
+            | "start_teaching"
             | "start_recording"
             | "stop_recording"
             | "replay_trajectory"
@@ -907,7 +914,9 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         // Surfaces that can reveal or control sensitive local/authenticated
         // state. Active adapters still decide their exact resource scope at
         // the canonical registry boundary before platform dispatch.
-        "zoom"
+        "get_teaching_state"
+        | "stop_teaching"
+        | "zoom"
         | "clipboard_read"
         | "list_apps"
         | "list_windows"
@@ -932,6 +941,7 @@ pub fn advertised_risk_for(tool: &str) -> RiskAssessment {
         "get_desktop_state"
         | "get_window_state"
         | "kill_app"
+        | "start_teaching"
         | "stop_recording"
         | "replay_trajectory"
         | "install_ffmpeg"
@@ -1025,7 +1035,9 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
             enforcement: RiskEnforcement::Active,
             operation_sensitive: true,
         },
-        "get_accessibility_tree"
+        "get_teaching_state"
+        | "stop_teaching"
+        | "get_accessibility_tree"
         | "list_apps"
         | "list_windows"
         | "debug_window_info"
@@ -1053,6 +1065,7 @@ pub fn classify_tool_call(tool: &str, args: &Value) -> RiskAssessment {
         },
         "browser_set_input_files"
         | "browser_download"
+        | "start_teaching"
         | "start_recording"
         | "stop_recording"
         | "replay_trajectory" => RiskAssessment {

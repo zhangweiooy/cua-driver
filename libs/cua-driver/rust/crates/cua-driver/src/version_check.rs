@@ -85,7 +85,7 @@ const RELEASES_URL: &str = "https://api.github.com/repos/trycua/cua/releases?per
 /// - `CARGO_PKG_VERSION` has a pre-release suffix (source / dev build —
 ///   nothing on GitHub will be "newer" in a meaningful way)
 pub fn maybe_announce_update() {
-    if !is_enabled() {
+    if cfg!(feature = "cua-win-product") || !is_enabled() {
         tracing::debug!(target: "cua_driver::version_check",
                         "update check skipped (opt-out / pre-release build)");
         return;

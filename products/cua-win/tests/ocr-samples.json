@@ -1,0 +1,8 @@
+[
+  {
+    "id": "synthetic-chinese-ui",
+    "kind": "synthetic",
+    "image": "ocr-chinese-smoke.png",
+    "expected_text": ["发送消息", "保存文件", "取消操作", "二等座", "中文输入测试", "你好，世界", "Hello Cua 123", "订单编号 A123"]
+  }
+]

@@ -28,6 +28,8 @@ pub mod health_report;
 pub mod overlay;
 pub mod pip;
 pub mod recording_hooks;
+#[cfg(target_os = "windows")]
+pub mod teaching;
 pub mod terminal;
 pub mod tools;
 

@@ -30,6 +30,8 @@ mod mcp_envelope;
 mod mcp_http;
 mod perception_cli;
 mod private_worker;
+#[cfg(feature = "cua-win-product")]
+mod product;
 mod proxy;
 mod release_channel;
 mod responsibility;
@@ -284,7 +286,16 @@ fn maybe_init_pip() {
 // ── Public SDK runtime host ──────────────────────────────────────────────
 
 fn register_host_tools(registry: &mut cua_driver_core::tool::ToolRegistry) {
+    #[cfg(all(feature = "cua-win-product", target_os = "windows"))]
+    {
+        let perception = cua_driver_core::perception_client::PerceptionClientHandle::fixed(
+            product::perception_client(),
+        );
+        registry.register_perception_tool(perception.clone());
+        platform_windows::teaching::register_into(registry, perception);
+    }
     history_runtime::register_host_tools(registry);
+    #[cfg(not(feature = "cua-win-product"))]
     extension_manager::register_host_tools(registry);
 }
 
@@ -467,6 +478,7 @@ mod mcp_runtime_selection_tests {
 #[cfg(target_os = "macos")]
 fn main() {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
+    #[cfg(not(feature = "cua-win-product"))]
     cua_driver_sdk::configure_perception_client_resolver(
         extension_manager::perception_client_resolver(),
     );
@@ -899,6 +911,10 @@ fn main() {
 #[cfg(not(target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
+    #[cfg(feature = "cua-win-product")]
+    if product::initialize()? {
+        return Ok(());
+    }
     // An elevated Driver runs shell launches through this executable with a
     // standard-user token (#3607). Checked first so the helper does no other
     // Driver work.
@@ -908,6 +924,7 @@ fn main() -> anyhow::Result<()> {
     {
         std::process::exit(code);
     }
+    #[cfg(not(feature = "cua-win-product"))]
     cua_driver_sdk::configure_perception_client_resolver(
         extension_manager::perception_client_resolver(),
     );
@@ -935,6 +952,8 @@ fn main() -> anyhow::Result<()> {
     // run on a plain OS thread — not inside a #[tokio::main] context which
     // would cause nested block_on panics.
     let command = cli::parse_command();
+    #[cfg(feature = "cua-win-product")]
+    product::validate_command(&command)?;
     if !telemetry::is_wrapped_cli_child() && !matches!(&command, cli::Command::Telemetry(_)) {
         telemetry::spawn_first_run_registration_worker();
     }

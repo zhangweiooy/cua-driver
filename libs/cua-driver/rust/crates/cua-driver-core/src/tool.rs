@@ -680,6 +680,7 @@ impl TrustedInvocationEvidence {
 
 /// Thread-safe collection of all registered tools.
 pub struct ToolRegistry {
+    teaching: Arc<crate::teaching::TeachingState>,
     tools: HashMap<String, Box<dyn Tool>>,
     /// Ordered list of tool names for `tools/list`.
     order: Vec<String>,
@@ -759,6 +760,7 @@ impl ToolRegistry {
             }));
         Self {
             tools: HashMap::new(),
+            teaching: Arc::new(crate::teaching::TeachingState::default()),
             order: Vec::new(),
             recording,
             history: None,
@@ -782,6 +784,9 @@ impl ToolRegistry {
     /// trusted runtime.
     pub fn approval_broker(&self) -> Arc<crate::consent::ApprovalBroker> {
         self.approval_broker.clone()
+    }
+    pub fn teaching_state(&self) -> Arc<crate::teaching::TeachingState> {
+        self.teaching.clone()
     }
 
     /// Return the immutable-capture service owned by this runtime registry.
@@ -1275,6 +1280,15 @@ impl ToolRegistry {
         // Normalize deprecated public argument spellings before any policy,
         // consent, recording, or implementation layer interprets the call.
         normalize_delivery_mode_args(tool.def(), &mut args);
+        if resolved_name == "start_teaching" && args.get("output_dir").is_none() {
+            let Some(home) = std::env::var_os("CUA_DRIVER_RS_HOME") else {
+                return protected_refusal(
+                    "teaching_output_unavailable",
+                    "Product user-data directory is unavailable.",
+                );
+            };
+            args["output_dir"] = serde_json::json!(PathBuf::from(home).join("teaching"));
+        }
         let unknown_argument = unknown_argument(tool.def(), &args);
         if let Err(result) = crate::action_target::normalize_action_target(resolved_name, &mut args)
         {
@@ -1445,6 +1459,11 @@ impl ToolRegistry {
                 &format!("{resolved_name}: unknown argument {name}"),
             );
         }
+
+        let _teaching_exclusion = match self.teaching.admit(resolved_name, tool.def().read_only) {
+            Ok(guard)=>guard,
+            Err(code)=>return protected_refusal(code, "Stop the teaching session before running automation; teaching and automation are mutually exclusive."),
+        };
 
         // Resource adapters run at the same canonical boundary as policy and
         // manifest admission, after session capture-scope validation but
@@ -2353,7 +2372,7 @@ impl ToolRegistry {
                     "Allow Cua to write this screenshot to the exact local path".to_owned(),
                 )
             }
-            "start_recording" => {
+            "start_recording" | "start_teaching" => {
                 let output = canonical_proposed_path(required_path_arg(args, "output_dir")?)?;
                 args["output_dir"] = Value::String(output.clone());
                 (

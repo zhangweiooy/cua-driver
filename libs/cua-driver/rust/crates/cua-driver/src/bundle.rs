@@ -36,7 +36,9 @@ pub fn is_local_installation() -> bool {
 }
 
 pub fn cli_name() -> &'static str {
-    if is_local_installation() {
+    if cfg!(feature = "cua-win-product") {
+        "cua-win"
+    } else if is_local_installation() {
         LOCAL_CLI_NAME
     } else {
         RELEASE_CLI_NAME
@@ -44,6 +46,9 @@ pub fn cli_name() -> &'static str {
 }
 
 pub fn state_namespace() -> &'static str {
+    #[cfg(feature = "cua-win-product")]
+    return crate::product::state_namespace();
+    #[cfg(not(feature = "cua-win-product"))]
     if is_local_installation() {
         "cua-driver-local"
     } else {
@@ -52,7 +57,9 @@ pub fn state_namespace() -> &'static str {
 }
 
 pub fn user_home_subdirectory() -> &'static str {
-    if is_local_installation() {
+    if cfg!(feature = "cua-win-product") {
+        ".cua-win"
+    } else if is_local_installation() {
         ".cua-driver-local"
     } else {
         ".cua-driver"
@@ -70,6 +77,9 @@ pub fn uia_executable_name() -> &'static str {
 
 #[cfg(target_os = "windows")]
 pub fn autostart_task_name() -> &'static str {
+    #[cfg(feature = "cua-win-product")]
+    return crate::product::state_namespace();
+    #[cfg(not(feature = "cua-win-product"))]
     if is_local_installation() {
         "cua-driver-local-serve"
     } else {
