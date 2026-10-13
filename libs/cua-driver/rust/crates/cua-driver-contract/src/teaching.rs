@@ -24,8 +24,8 @@ pub fn contracts() -> Vec<ToolContract> {
             }
             ToolContract {
                 name: name.into(),
-                description: format!("{name}: Windows human demonstration. One active session per runtime; automation is mutually exclusive. Password/unknown fields omit text and images. Results include action sequences, output_dir and relative file references. OCR is used only when committed text is unavailable. complete describes action collection/storage; evidence.complete separately describes optional screenshots/OCR. Normal stop writes a completion marker when actions are complete; cancel cleans only this session. CLI callers must use an explicit session label."),
-                platforms: vec![Platform::Windows],
+                description: format!("{name}: Human demonstration on Windows and macOS. One active session per runtime; automation is mutually exclusive. Password/unknown fields omit text and images. Results include action sequences, output_dir and relative file references. OCR is used only when committed text is unavailable. complete describes action collection/storage; evidence.complete separately describes optional screenshots/OCR. Normal stop writes a completion marker when actions are complete; cancel cleans only this session. CLI callers must use an explicit session label."),
+                platforms: vec![Platform::Windows, Platform::Macos],
                 aliases: vec![],
                 capabilities: vec![],
                 annotations: ToolAnnotations {
