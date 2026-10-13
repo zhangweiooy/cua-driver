@@ -5,9 +5,29 @@ from pathlib import Path
 import plistlib
 import subprocess
 import sys
+import tarfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import package
+
+
+def app_template(lock, target):
+    """Retain upstream bundle metadata/resources, never its signing identity."""
+    archive = package.component_dir(lock, 'driver', target) / lock['targets'][target]['driver']['asset']
+    with tarfile.open(archive) as tar:
+        infos = [m for m in tar.getmembers() if m.isfile() and m.name.endswith('/CuaDriver.app/Contents/Info.plist')]
+        if len(infos) != 1:
+            raise ValueError('pinned Driver archive must contain one application bundle')
+        info = plistlib.load(tar.extractfile(infos[0]))
+        prefix = infos[0].name.removesuffix('Info.plist')
+        resources = {}
+        for member in tar.getmembers():
+            if member.isfile() and member.name.startswith(prefix + 'Resources/'):
+                relative = member.name.removeprefix(prefix)
+                if '..' in Path(relative).parts:
+                    raise ValueError('unsafe app resource path')
+                resources[relative] = tar.extractfile(member).read()
+    return info, resources
 
 
 def main():
@@ -20,10 +40,11 @@ def main():
     lock = package.read_json(package.ROOT / 'upstream.lock.json')
     config = lock['targets'][target]
     package.prepare(lock, target, args.offline)
+    info, resources = app_template(lock, target)
     workspaces = dict(driver=package.REPO / 'libs/cua-driver/rust',
                       perception=package.CACHE / lock['perception']['tag'] / 'source/libs/cua-driver/rust')
     outputs = {}
-    environment = dict(os.environ, MACOSX_DEPLOYMENT_TARGET='13.0')
+    environment = dict(os.environ, MACOSX_DEPLOYMENT_TARGET=info['LSMinimumSystemVersion'])
     for component, workspace in workspaces.items():
         package.verify(workspace / 'Cargo.lock', lock[component]['cargo_lock_sha256'])
         output = package.component_dir(lock, component, target) / 'build'
@@ -38,11 +59,15 @@ def main():
     contents = app / 'Contents'
     package.assemble(lock, target, outputs['driver'], outputs['perception'], contents)
     release_version = lock['product_version'].split('-')[0]
-    info = dict(CFBundleExecutable='cua', CFBundleIdentifier=config['bundle_id'],
+    info.update(CFBundleExecutable=config['cli_name'], CFBundleIdentifier=config['bundle_id'],
                 CFBundleName=config['app_name'], CFBundleDisplayName=config['app_name'],
                 CFBundlePackageType='APPL', CFBundleVersion=release_version,
-                CFBundleShortVersionString=release_version, LSMinimumSystemVersion='13.0',
+                CFBundleShortVersionString=release_version,
                 LSUIElement=True, NSHighResolutionCapable=True)
+    for relative, data in resources.items():
+        destination = contents / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(data)
     with (contents / 'Info.plist').open('wb') as stream:
         plistlib.dump(info, stream)
     package.seal(lock, target, contents)

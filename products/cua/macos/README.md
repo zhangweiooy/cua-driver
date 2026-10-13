@@ -11,7 +11,9 @@ python3 products/cua/macos/build.py
 # After preparation, --offline prohibits fetching missing inputs.
 ```
 
-The script builds both pinned components, creates `Cua.app`, and invokes
+The script builds both pinned components, retains the upstream app template's
+permission usage descriptions, minimum OS declaration and resources, then
+applies the product bundle identity and creates `Cua.app`. It invokes
 `pkgbuild` for an **unsigned development installer**. Production signing,
 notarization and signed-package integrity require their own native validation;
 this script does not claim a release-ready signed distribution. Run CLI/MCP
