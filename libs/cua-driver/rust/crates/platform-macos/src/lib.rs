@@ -44,6 +44,8 @@ pub mod pointer_shape_map;
 #[cfg(target_os = "macos")]
 pub mod recording_hooks;
 #[cfg(target_os = "macos")]
+pub mod teaching;
+#[cfg(target_os = "macos")]
 pub mod session;
 #[cfg(target_os = "macos")]
 pub mod terminal;
