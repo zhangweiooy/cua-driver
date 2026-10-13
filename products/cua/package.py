@@ -67,6 +67,7 @@ def component_dir(lock, component, target):
 
 def prepare(lock, target, offline=False):
     config = lock['targets'][target]
+    subprocess.run(['git', '-C', str(REPO), 'merge-base', '--is-ancestor', lock['driver']['commit'], 'HEAD'], check=True)
     for component in ('driver', 'perception'):
         release = lock[component]
         actual = subprocess.check_output(['git', '-C', str(REPO), 'rev-parse', release['tag'] + '^{commit}'], text=True).strip()

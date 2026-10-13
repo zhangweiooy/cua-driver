@@ -7,8 +7,10 @@ ONNX Runtime and notices. It does not contain Florence or a Python runtime.
 The adjacent build output `source/<product-version>/` contains both pinned upstream source
 archives, the original Perception release archive with its model inputs and
 conversion materials, and the downstream patch and new product files.
-Apply `downstream.patch` to the pinned Driver source and copy `products/cua/`
-from the attachment into the checkout. The Perception release archive includes its own
+Use a checkout containing both pinned component tags, apply `downstream.patch`
+to the pinned Driver source, and copy `products/cua/` from the attachment into
+the checkout. Build preparation verifies tag identity and Driver ancestry.
+The Perception release archive includes its own
 `notices/SOURCE_OFFER.md` and corresponding conversion materials.
 If a working-tree build includes `new-files/`, overlay those not-yet-tracked
 source files onto the Driver source root as well.
