@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import package
@@ -78,6 +79,18 @@ class PackagingTests(unittest.TestCase):
             path.write_bytes(b'bad')
             with self.assertRaisesRegex(ValueError, 'SHA256 mismatch'):
                 package.download(path, expected, 'https://invalid.example/', True)
+
+    def test_source_export_never_overlays_a_previous_snapshot(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            previous = root / 'out/source' / self.lock['product_version']
+            previous.mkdir(parents=True)
+            marker = previous / 'old-source.rs'
+            marker.write_text('preserve previous source', encoding='utf-8')
+            with patch.object(package, 'ROOT', root):
+                with self.assertRaisesRegex(FileExistsError, 'preserve existing source export'):
+                    package.sources(self.lock)
+            self.assertEqual(marker.read_text(encoding='utf-8'), 'preserve previous source')
 
 
 if __name__ == '__main__':

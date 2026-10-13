@@ -175,12 +175,14 @@ def seal(lock, target, output):
 
 def sources(lock):
     output = ROOT / 'out/source' / lock['product_version']
-    output.mkdir(parents=True, exist_ok=True)
+    if output.exists():
+        raise FileExistsError(f'preserve existing source export and choose a fresh output: {output}')
+    output.mkdir(parents=True)
     for component in ('driver', 'perception'):
         shutil.copy2(CACHE / lock[component]['tag'] / 'source.tar', output / (lock[component]['tag'] + '-source.tar'))
     with (output / 'downstream.patch').open('wb') as stream:
         subprocess.run(['git', '-C', str(REPO), 'diff', '--binary', lock['driver']['commit']], stdout=stream, check=True)
-    shutil.copytree(ROOT, output / 'products/cua', ignore=shutil.ignore_patterns('.cache', 'out', '__pycache__'), dirs_exist_ok=True)
+    shutil.copytree(ROOT, output / 'products/cua', ignore=shutil.ignore_patterns('.cache', 'out', '__pycache__'))
     for relative in subprocess.check_output(['git', '-C', str(REPO), 'ls-files', '--others', '--exclude-standard', 'libs/cua-driver/rust/crates'], text=True).splitlines():
         destination = output / 'new-files' / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
