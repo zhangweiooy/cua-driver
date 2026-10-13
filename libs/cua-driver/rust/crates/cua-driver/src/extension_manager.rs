@@ -1074,7 +1074,7 @@ fn perception_client_in(store: &ExtensionStore) -> PerceptionClient {
 /// Resolver a running Driver consults before every `parse_visual_regions`
 /// request. It fingerprints the installation cheaply and re-runs the full
 /// startup verification only when install, update, or removal changed it.
-#[cfg(not(feature = "cua-win-product"))]
+#[cfg(not(feature = "cua-product"))]
 pub(crate) fn perception_client_resolver() -> std::sync::Arc<dyn PerceptionClientResolver> {
     std::sync::Arc::new(InstalledPerceptionResolver { root: None })
 }
@@ -1173,9 +1173,9 @@ fn perception_install_fingerprint(store: &ExtensionStore) -> String {
 }
 
 pub(crate) fn perception_client_for_cli() -> Result<PerceptionClient> {
-    #[cfg(feature = "cua-win-product")]
+    #[cfg(feature = "cua-product")]
     return Ok(crate::product::perception_client());
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     match perception_worker_config()? {
         Some(config) => PerceptionClient::new(config).map_err(|error| {
             anyhow!(serde_json::to_string(&error).unwrap_or_else(|_| error.message.clone()))

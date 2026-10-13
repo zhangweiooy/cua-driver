@@ -21,17 +21,24 @@ def run(exe, *args, ok=True):
     return result
 
 
+def layout(bundle):
+    manifest = json.loads((bundle / "cua-package.json").read_text(encoding="utf-8"))
+    lock = json.loads((bundle / "upstream.lock.json").read_text(encoding="utf-8"))
+    return lock["targets"][manifest["target"]]
+
+
 def test_integrity(bundle, cache):
-    assert json.loads(run(bundle / "cua-win.exe", "package-check").stdout)["success"]
+    config = layout(bundle)
+    assert json.loads(run(bundle / config["binary"], "package-check").stdout)["success"]
     with tempfile.TemporaryDirectory(prefix="package-test-", dir=cache) as temporary:
         isolated = Path(temporary) / "中文路径"
         shutil.copytree(bundle, isolated)
-        exe = isolated / "cua-win.exe"
+        exe = isolated / config["binary"]
         assert json.loads(run(exe, "package-check").stdout)["success"]
-        manifest_path = isolated / "cua-win-package.json"
+        manifest_path = isolated / "cua-package.json"
         original = manifest_path.read_bytes()
         manifest = json.loads(original)
-        worker = isolated / "perception/cua-perception.exe"
+        worker = isolated / config["perception_dir"] / config["worker"]
         preserved = worker.with_suffix(".preserved")
         worker.rename(preserved)
         assert "missing package file" in run(exe, "package-check", ok=False).stderr
@@ -49,9 +56,9 @@ def test_integrity(bundle, cache):
         assert "identity/protocol mismatch" in run(exe, "package-check", ok=False).stderr
         assert "identity/protocol mismatch" in run(exe, "mcp", "--no-overlay", ok=False).stderr
         manifest = json.loads(original)
-        contract = json.loads((isolated / "perception/runtime-contract.json").read_text(encoding="utf-8"))
+        contract = json.loads((isolated / config["perception_dir"] / "runtime-contract.json").read_text(encoding="utf-8"))
         recognizer = next(model["name"] for model in contract["models"] if model["role"] == "ocr-recognize")
-        del manifest["files"][f"perception/models/{recognizer}"]
+        del manifest["files"][f"{config['perception_dir']}/models/{recognizer}"]
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         assert "does not bind runtime resource" in run(exe, "package-check", ok=False).stderr
         manifest = json.loads(original)
@@ -59,13 +66,14 @@ def test_integrity(bundle, cache):
         manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
         assert "invalid package-relative path" in run(exe, "package-check", ok=False).stderr
         manifest = json.loads(original)
-        del manifest["files"]["perception/msvcp140.dll"]
-        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-        assert "required CRT resource" in run(exe, "package-check", ok=False).stderr
+        if "runtime_dependencies" in config:
+            del manifest["files"][config["perception_dir"] + "/" + config["runtime_dependencies"]["files"][0]["name"]]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            assert "required CRT resource" in run(exe, "package-check", ok=False).stderr
         manifest_path.write_bytes(original)
         # Normal Driver startup does not hash model payloads. Loading a damaged
         # model still fails through the upstream worker's own manifest validator.
-        model = isolated / "perception/models" / recognizer
+        model = isolated / config["perception_dir"] / "models" / recognizer
         with model.open("r+b") as stream:
             first = stream.read(1)
             stream.seek(0)
@@ -73,8 +81,8 @@ def test_integrity(bundle, cache):
         try:
             test_mcp(isolated, cache)
             assert "sha256 mismatch" in run(
-                worker, "--manifest", str(isolated / "perception/model-manifest.json"),
-                "--onnx-runtime-library", str(isolated / "perception/runtime/onnxruntime.dll"),
+                worker, "--manifest", str(isolated / config["perception_dir"] / "model-manifest.json"),
+                "--onnx-runtime-library", str(isolated / config["perception_dir"] / config["runtime_library"]),
                 "--extension-id", "cua-perception", "--extension-version", manifest["product_version"],
                 ok=False,
             ).stderr.lower()
@@ -106,12 +114,14 @@ def test_integrity(bundle, cache):
             time.sleep(0.1)
         else:
             raise AssertionError("isolated daemon did not stop")
-    return {"integrity": "passed", "negative_cases": 12, "startup_without_payload_hashing": "passed", "upstream_model_hash_rejection": "passed", "unicode_path": "passed", "daemon_start_status_stop": "passed"}
+    return {"integrity": "passed", "negative_cases": 12 if "runtime_dependencies" in config else 11, "startup_without_payload_hashing": "passed", "upstream_model_hash_rejection": "passed", "unicode_path": "passed", "daemon_start_status_stop": "passed"}
 
 
 def test_mcp(bundle, cache):
-    environment = dict(os.environ, CUA_WIN_STATE_DIR=str(cache / "mcp-state"), DO_NOT_TRACK="1")
-    process = subprocess.Popen([str(bundle / "cua-win.exe"), "mcp", "--no-overlay"],
+    config = layout(bundle)
+    environment = dict(os.environ, DO_NOT_TRACK="1")
+    environment[config["state_override"]] = str(cache / "mcp-state")
+    process = subprocess.Popen([str(bundle / config["binary"]), "mcp", "--no-overlay"],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, encoding="utf-8", env=environment)
     responses = queue.Queue()
@@ -176,7 +186,7 @@ def main():
     parser.add_argument("bundle", type=Path)
     args = parser.parse_args()
     bundle = args.bundle.resolve(strict=True)
-    cache = Path(__file__).resolve().parent / ".cache" / "tests"
+    cache = Path(__file__).resolve().parent.parent / ".cache" / "tests"
     cache.mkdir(parents=True, exist_ok=True)
     results = {**test_integrity(bundle, cache), **test_mcp(bundle, cache)}
     results["not_run"] = ["Windows 1903", "host input", "full Chinese OCR quality", "human teaching"]

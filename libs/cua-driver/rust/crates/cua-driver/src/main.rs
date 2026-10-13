@@ -30,7 +30,7 @@ mod mcp_envelope;
 mod mcp_http;
 mod perception_cli;
 mod private_worker;
-#[cfg(feature = "cua-win-product")]
+#[cfg(feature = "cua-product")]
 mod product;
 mod proxy;
 mod release_channel;
@@ -286,16 +286,23 @@ fn maybe_init_pip() {
 // ── Public SDK runtime host ──────────────────────────────────────────────
 
 fn register_host_tools(registry: &mut cua_driver_core::tool::ToolRegistry) {
-    #[cfg(all(feature = "cua-win-product", target_os = "windows"))]
+    #[cfg(all(
+        feature = "cua-product",
+        any(target_os = "windows", target_os = "macos")
+    ))]
     {
         let perception = cua_driver_core::perception_client::PerceptionClientHandle::fixed(
             product::perception_client(),
         );
         registry.register_perception_tool(perception.clone());
-        platform_windows::teaching::register_into(registry, perception);
+        #[cfg(target_os = "windows")]
+        let backend = Arc::new(platform_windows::teaching::WindowsBackend);
+        #[cfg(target_os = "macos")]
+        let backend = Arc::new(platform_macos::teaching::MacosBackend);
+        cua_driver_core::teaching::register_into(registry, perception, backend);
     }
     history_runtime::register_host_tools(registry);
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     extension_manager::register_host_tools(registry);
 }
 
@@ -478,12 +485,21 @@ mod mcp_runtime_selection_tests {
 #[cfg(target_os = "macos")]
 fn main() {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     cua_driver_sdk::configure_perception_client_resolver(
         extension_manager::perception_client_resolver(),
     );
     if let Some(code) = platform_macos::permissions::gate::run_permission_probe_if_requested() {
         std::process::exit(code);
+    }
+    #[cfg(feature = "cua-product")]
+    match product::initialize() {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
     }
     // The packaged uninstaller needs a truly offline, pre-telemetry purge
     // path while this exact signed executable still exists on disk.
@@ -530,6 +546,11 @@ fn main() {
     // Handled before AppKit init so `list-tools` / `describe` / `call` exit
     // cleanly without starting the overlay or NSApplication.
     let command = cli::parse_command();
+    #[cfg(feature = "cua-product")]
+    if let Err(error) = product::validate_command(&command) {
+        eprintln!("{error:#}");
+        std::process::exit(1);
+    }
     if !telemetry::is_wrapped_cli_child() && !matches!(&command, cli::Command::Telemetry(_)) {
         telemetry::spawn_first_run_registration_worker();
     }
@@ -911,7 +932,7 @@ fn main() {
 #[cfg(not(target_os = "macos"))]
 fn main() -> anyhow::Result<()> {
     cua_driver_core::build_info::init(env!("CUA_DRIVER_GIT_SHA"));
-    #[cfg(feature = "cua-win-product")]
+    #[cfg(feature = "cua-product")]
     if product::initialize()? {
         return Ok(());
     }
@@ -924,7 +945,7 @@ fn main() -> anyhow::Result<()> {
     {
         std::process::exit(code);
     }
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     cua_driver_sdk::configure_perception_client_resolver(
         extension_manager::perception_client_resolver(),
     );
@@ -952,7 +973,7 @@ fn main() -> anyhow::Result<()> {
     // run on a plain OS thread — not inside a #[tokio::main] context which
     // would cause nested block_on panics.
     let command = cli::parse_command();
-    #[cfg(feature = "cua-win-product")]
+    #[cfg(feature = "cua-product")]
     product::validate_command(&command)?;
     if !telemetry::is_wrapped_cli_child() && !matches!(&command, cli::Command::Telemetry(_)) {
         telemetry::spawn_first_run_registration_worker();

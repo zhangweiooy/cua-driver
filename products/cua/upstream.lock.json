@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "product": "cua",
+  "product_version": "0.4.0-dev.12",
+  "repository": "https://github.com/trycua/cua.git",
+  "driver": {
+    "version": "0.34.1",
+    "tag": "cua-driver-rs-v0.34.1",
+    "commit": "0c69d9a2c8abbb5051a2df4a23f0fa166d5385dc",
+    "source_sha256": "c5464aa4919bf4d744b5307638c3619ddb63a53545dc8cc4dbe157f9cb6ace49",
+    "source_format": "git archive --format=tar RELEASE_TAG",
+    "cargo_lock_sha256": "a36ac042e8f9426c28fac1119a4b06cdb34b36b221b2e85fb9c4fbeb094b1cfe",
+    "rust_toolchain": "1.97.1"
+  },
+  "perception": {
+    "version": "0.2.1",
+    "tag": "cua-perception-v0.2.1",
+    "commit": "6aa37d0751d094bfe8fdc2df331ed9eae934c832",
+    "protocol_version": 1,
+    "onnx_runtime_version": "1.26.0",
+    "ocr_baseline": "PP-OCRv5 Chinese recognizer and dictionary from chinese_ocr",
+    "source_sha256": "3deafaa6b3e833d8f65e374b2d9e3aa4be8dbada8f5678c5e0caddcd66475c49",
+    "source_format": "git archive --format=tar RELEASE_TAG",
+    "cargo_lock_sha256": "defd1806bdebeb4a431f9dcba5468f378cb3b6450a26f01b6572029af3cdcc37",
+    "rust_toolchain": "1.97.1"
+  },
+  "chinese_ocr": {
+    "status": "development candidate; full quality acceptance pending",
+    "repository": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx",
+    "revision": "ed152b8b495f84de93cda5709d768548a9127622",
+    "license": "Apache-2.0",
+    "model": {
+      "filename": "ppocrv5-mobile-rec-zh.onnx",
+      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx/resolve/ed152b8b495f84de93cda5709d768548a9127622/inference.onnx",
+      "sha256": "da72dc72ca4dc220df0dfde68c1dedc31c58d3e76a25871122e5056227d50092"
+    },
+    "dictionary": {
+      "filename": "ppocrv5-mobile-rec-zh-inference.yml",
+      "url": "https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec_onnx/resolve/ed152b8b495f84de93cda5709d768548a9127622/inference.yml",
+      "sha256": "5dfeb2777f6d0db8177d8128a8acfcf6e6276dc4ac73ea3bf0dc06d6a5e85d8e"
+    }
+  },
+  "targets": {
+    "x86_64-pc-windows-msvc": {
+      "product": "cua-win",
+      "cli_name": "cua-win",
+      "binary": "cua-win.exe",
+      "directory_from_executable": ".",
+      "state_env": "LOCALAPPDATA",
+      "state_path": "cua-win/rust",
+      "state_override": "CUA_WIN_STATE_DIR",
+      "perception_dir": "perception",
+      "worker": "cua-perception.exe",
+      "runtime_library": "runtime/onnxruntime.dll",
+      "minimum_os": "Windows 10 build 18362",
+      "installer": {
+        "app_id": "B99CB8B0-5DE5-4A0B-AEF9-69A6A3F64668",
+        "default_directory": "{localappdata}\\Programs\\cua-win",
+        "privileges": "lowest"
+      },
+      "runtime_dependencies": {
+        "version": "14.44.35211",
+        "filename": "msvc-14.44.35211-x64.vsix",
+        "url": "https://download.visualstudio.microsoft.com/download/pr/45d3b8dd-bced-4b37-9974-142f748d710c/4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5/Microsoft.VC.14.44.17.14.CRT.Redist.X64.base.vsix",
+        "sha256": "4aaf54db0bfc9435f7c3660e1a00237a4b556042bfeea64bde44c2e0194e6ee5",
+        "member_prefix": "Contents/VC/Redist/MSVC/14.44.35112/x64/Microsoft.VC143.CRT/",
+        "files": [
+          {
+            "name": "msvcp140.dll",
+            "sha256": "0f885b509a685d2bbfa652fed26b5fb31d88fbdab0a978c641d1c7b8aa460aa9"
+          },
+          {
+            "name": "msvcp140_1.dll",
+            "sha256": "bfad5aef4c63a669e3c140655cdfdf395b6c979b400a447bd5dcb65ed8826c3d"
+          },
+          {
+            "name": "vcruntime140.dll",
+            "sha256": "d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066"
+          },
+          {
+            "name": "vcruntime140_1.dll",
+            "sha256": "1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f"
+          }
+        ]
+      },
+      "driver": {
+        "asset": "cua-driver-rs-0.34.1-windows-x86_64-binary.zip",
+        "sha256": "021bc2e5330c80a6c5e2c347c305fafbd4defe195d6282e0d20436f2f13c19bb"
+      },
+      "perception": {
+        "asset": "cua-perception-0.2.1-x86_64-pc-windows-msvc.tar.gz",
+        "sha256": "6709579aa3f938e8200c0a51b1abe450d4fda51b09e97517e0cb4c272b5bff37",
+        "runtime_contract_asset": "cua-perception-0.2.1-x86_64-pc-windows-msvc.runtime-contract.json",
+        "runtime_contract_sha256": "b7a44501034f3e62d10ae065000e59530a5c3e0c6429bdb427c7c26828c79a3e"
+      }
+    },
+    "aarch64-apple-darwin": {
+      "product": "cua",
+      "cli_name": "cua",
+      "binary": "MacOS/cua",
+      "directory_from_executable": "..",
+      "state_env": "HOME",
+      "state_path": "Library/Application Support/cua",
+      "state_override": "CUA_PRODUCT_STATE_DIR",
+      "perception_dir": "Resources/perception",
+      "worker": "cua-perception",
+      "runtime_library": "runtime/libonnxruntime.dylib",
+      "minimum_os": "macOS 13.0",
+      "app_name": "Cua",
+      "bundle_id": "com.zhangweiooy.cua",
+      "driver": {
+        "asset": "cua-driver-rs-0.34.1-darwin-arm64.tar.gz",
+        "sha256": "83ffed8d41ef0f133976d594b02eb86dd59ef4a8721396b6e25078a59c6056d6"
+      },
+      "perception": {
+        "asset": "cua-perception-0.2.1-aarch64-apple-darwin.tar.gz",
+        "sha256": "5fbcf59c15fc5cd8beca6ac4aa5533c34359054810aceb12c9e26d7a45e750ab",
+        "runtime_contract_asset": "cua-perception-0.2.1-aarch64-apple-darwin.runtime-contract.json",
+        "runtime_contract_sha256": "35df4127b9612c3ca94efe90da49d093d4ef8e7e663118288a4f174d60f9260f"
+      }
+    }
+  }
+}

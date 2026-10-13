@@ -1,18 +1,17 @@
-# cua-win development bundle sources
+# Cua product development bundle sources
 
 This is a downstream development build, not an official Cua Driver release.
 The installed runtime contains only native executables, model artifacts,
 ONNX Runtime and notices. It does not contain Florence or a Python runtime.
 
-The adjacent build output `source/cua-win-<product-version>/` contains both pinned upstream source
+The adjacent build output `source/<product-version>/` contains both pinned upstream source
 archives, the original Perception release archive with its model inputs and
 conversion materials, and the downstream patch and new product files.
-Apply `cua-win.patch` to the Driver release source; place `product.rs` under
-`libs/cua-driver/rust/crates/cua-driver/src/` and the product files under
-`products/cua-win/`. The Perception release archive includes its own
+Apply `downstream.patch` to the pinned Driver source and copy `products/cua/`
+from the attachment into the checkout. The Perception release archive includes its own
 `notices/SOURCE_OFFER.md` and corresponding conversion materials.
-Overlay the `new-files/` directory onto the Driver source root; it contains
-the newly added shared and Windows teaching modules not present in git diff.
+If a working-tree build includes `new-files/`, overlay those not-yet-tracked
+source files onto the Driver source root as well.
 
 This local development candidate is not a published distribution. Before distributing
 a product installer, publish the matching complete source attachment and

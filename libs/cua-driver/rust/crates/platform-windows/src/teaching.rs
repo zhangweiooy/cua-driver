@@ -1054,7 +1054,7 @@ mod tests {
     /// Native UIA and the real event-processing channel, with fixture-owned
     /// semantic changes. This is not evidence of physical keyboard/IME input.
     #[test]
-    #[ignore = "interactive Windows desktop; run products/cua-win/verify-teaching.ps1"]
+    #[ignore = "interactive Windows desktop; run products/cua/windows/verify-teaching.ps1"]
     fn native_teaching_uia_text_privacy_and_event_pipeline() {
         unsafe {
             let _ = windows::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
@@ -1217,7 +1217,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "interactive WGC/OCR fixture; run products/cua-win/verify-teaching.ps1"]
+    #[ignore = "interactive WGC/OCR fixture; run products/cua/windows/verify-teaching.ps1"]
     fn native_teaching_screenshot_ocr_and_sensitive_gate() {
         use cua_driver_core::perception_client::{PerceptionClient, PerceptionWorkerConfig};
         unsafe {
@@ -1229,7 +1229,7 @@ mod tests {
             std::env::var_os("CUA_TEACHING_TEST_BUNDLE").expect("test requires the built bundle"),
         );
         let manifest: Value =
-            serde_json::from_slice(&std::fs::read(root.join("cua-win-package.json")).unwrap())
+            serde_json::from_slice(&std::fs::read(root.join("cua-package.json")).unwrap())
                 .unwrap();
         let version = manifest["product_version"].as_str().unwrap();
         let mut config = PerceptionWorkerConfig::installed_with_identity(

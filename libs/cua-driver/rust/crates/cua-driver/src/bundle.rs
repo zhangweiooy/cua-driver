@@ -36,9 +36,10 @@ pub fn is_local_installation() -> bool {
 }
 
 pub fn cli_name() -> &'static str {
-    if cfg!(feature = "cua-win-product") {
-        "cua-win"
-    } else if is_local_installation() {
+    #[cfg(feature = "cua-product")]
+    return &crate::product::target().cli_name;
+    #[cfg(not(feature = "cua-product"))]
+    if is_local_installation() {
         LOCAL_CLI_NAME
     } else {
         RELEASE_CLI_NAME
@@ -46,9 +47,9 @@ pub fn cli_name() -> &'static str {
 }
 
 pub fn state_namespace() -> &'static str {
-    #[cfg(feature = "cua-win-product")]
+    #[cfg(feature = "cua-product")]
     return crate::product::state_namespace();
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     if is_local_installation() {
         "cua-driver-local"
     } else {
@@ -57,7 +58,7 @@ pub fn state_namespace() -> &'static str {
 }
 
 pub fn user_home_subdirectory() -> &'static str {
-    if cfg!(feature = "cua-win-product") {
+    if cfg!(feature = "cua-product") {
         ".cua-win"
     } else if is_local_installation() {
         ".cua-driver-local"
@@ -77,9 +78,9 @@ pub fn uia_executable_name() -> &'static str {
 
 #[cfg(target_os = "windows")]
 pub fn autostart_task_name() -> &'static str {
-    #[cfg(feature = "cua-win-product")]
+    #[cfg(feature = "cua-product")]
     return crate::product::state_namespace();
-    #[cfg(not(feature = "cua-win-product"))]
+    #[cfg(not(feature = "cua-product"))]
     if is_local_installation() {
         "cua-driver-local-serve"
     } else {
@@ -88,6 +89,12 @@ pub fn autostart_task_name() -> &'static str {
 }
 
 pub fn app_name() -> &'static str {
+    #[cfg(all(feature = "cua-product", target_os = "macos"))]
+    return crate::product::target()
+        .app_name
+        .as_deref()
+        .expect("macOS app name");
+    #[cfg(not(all(feature = "cua-product", target_os = "macos")))]
     if is_local_installation() {
         LOCAL_APP_NAME
     } else {
@@ -101,6 +108,12 @@ pub fn app_bundle_path() -> String {
 }
 
 pub fn bundle_id() -> &'static str {
+    #[cfg(all(feature = "cua-product", target_os = "macos"))]
+    return crate::product::target()
+        .bundle_id
+        .as_deref()
+        .expect("macOS bundle ID");
+    #[cfg(not(all(feature = "cua-product", target_os = "macos")))]
     if is_local_installation() {
         LOCAL_BUNDLE_ID
     } else {
@@ -117,6 +130,9 @@ pub fn is_executable_inside_cuadriver_app() -> bool {
         .and_then(|path| std::fs::canonicalize(path).ok())
         .is_some_and(|path| {
             path.to_str().is_some_and(|path| {
+                #[cfg(feature = "cua-product")]
+                return path.contains(&format!("/{}.app/Contents/MacOS/", app_name()));
+                #[cfg(not(feature = "cua-product"))]
                 path.contains("/CuaDriver.app/Contents/MacOS/")
                     || path.contains("/CuaDriverLocal.app/Contents/MacOS/")
             })

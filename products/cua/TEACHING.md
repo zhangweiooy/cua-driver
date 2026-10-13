@@ -1,6 +1,6 @@
-# Windows 真人示教接口
+# 共享真人示教接口
 
-实现依据：`cua-pywin/docs/cua-driver-secondary-development-plan.md`（2026-10-13）。
+共享核心负责会话、事件处理、证据与文件；Windows/macOS 后端负责原生监听、上下文和截图。Windows 基线及 macOS 验收边界分别见平台说明。
 本产品使用新的 CLI/MCP 接口；Oryx 负责界面、Agent 暂停、技能生成和长期数据管理。
 
 ## 调用
@@ -8,7 +8,7 @@
 MCP 使用 `start_teaching`、`get_teaching_state`、`stop_teaching`。同一个运行时只允许一个活动示教；保持相同调用身份和 `session_id`。
 
 ```json
-{"session_id":"demo-1","max_seconds":600,"output_dir":"D:/Demos"}
+{"session_id":"demo-1","max_seconds":600}
 ```
 
 以上是 start_teaching 参数。output_dir 为可选的输出父目录；省略时使用产品用户数据目录下的 teaching 目录。每次新建 teaching-UUID 子目录，不覆盖已有会话。写入沿用 Driver 的文件输出授权边界。
@@ -28,14 +28,15 @@ MCP 使用 `start_teaching`、`get_teaching_state`、`stop_teaching`。同一个
 
 CLI 通过上游 `serve` 持久运行时调用。每次 JSON 中都提供同一个显式 `session` 标签；它是上游调用身份，session_id 是示教编号：
 
-```powershell
-# 在独立终端运行持久 Driver；正常权限模式保留上游授权流程
-cua-win serve
-# 以下调用使用不同 CLI 进程，但拥有同一命名会话
-'{"session":"demo-client","session_id":"demo-1"}' | cua-win call start_teaching --json
-'{"session":"demo-client","session_id":"demo-1"}' | cua-win call get_teaching_state --json
-'{"session":"demo-client","session_id":"demo-1"}' | cua-win call stop_teaching --json
+以下是与平台无关的命令形式；将 `<driver>` 替换为 Windows 的 `cua-win.exe` 或 macOS 的 `Cua.app/Contents/MacOS/cua`，JSON 通过标准输入传入：
+
+```text
+<driver> serve
+<driver> call start_teaching --json     {"session":"demo-client","session_id":"demo-1"}
+<driver> call get_teaching_state --json {"session":"demo-client","session_id":"demo-1"}
+<driver> call stop_teaching --json      {"session":"demo-client","session_id":"demo-1"}
 ```
+
 
 未指定显式 session 的一次性 CLI 启动请求会返回 teaching_requires_named_session，避免 CLI 退出立刻销毁示教。MCP 连接结束、显式结束所属会话、上游会话过期、600 秒保护时限或桌面不可访问都会结束采集并保留结果。
 
@@ -55,17 +56,17 @@ cua-win serve
 
 ## 采集边界
 
-Windows 钩子只记录输入、来源和时间，进入有界队列。独立处理路径进行文字/滚动/双击合并和简单 UIA 控件查询。慢 UIA 不在输入回调中运行；未知上下文保留元信息。
+平台后端把原生输入转换为语义按键、点击、滚动事件，进入有界队列。共享层合并文字、滚动和双击。UIA/AX 查询不在原生输入回调中运行；未知上下文保留元信息。
 
-UIA 查询最多等待 750ms，与旧 cua-pywin 一致。点击按位置查询控件，不要求点击前后焦点相同，也不受 250ms 事件年龄限制；仍核对该位置属于原目标窗口和进程。键盘输入保留焦点和时效绑定，避免把其他控件的文字归入原输入。
+后端上下文查询采用有界工作线程，最多等待 750ms。点击查询点击目标，键盘查询焦点目标；时效与身份由后端核验，核心只比较不透明的窗口/控件标识。Windows 的 HWND、虚拟键码和 UIA RuntimeId 不作为 macOS 或公共协议的前置条件。键盘动作以 keyName/modifiers 表达；Windows 保留既有可选 keyCode 诊断字段，消费者不能依赖它跨平台回放。
 
-控件提交值可读取时，拼音组合停顿不按固定时长判为文字缺失；Escape 取消且提交值未变化时不生成文字。读取 UIA 期间到达的按键先保留处理顺序，避免粘贴后的新值提前覆盖文字差分基准。
+控件提交值可读取时，拼音组合停顿不按固定时长判为文字缺失；Escape 取消且提交值未变化时不生成文字。读取原生上下文期间到达的按键先保留处理顺序，避免粘贴后的新值提前覆盖文字差分基准。
 
-文字差分仅为同一窗口、进程和焦点控件的后续文字输入暂缓；点击、导航和其他控件的事件到来前，先结算已确认的文字。文字身份在点击、键盘和轮询路径中统一由目标进程、窗口及 UIA 控件信息生成；控件没有独立 HWND 时按有效的 0 处理，不混入宿主焦点 HWND。双击合并单独使用点击目标身份，不改变文字基准身份。
+文字差分仅为同一窗口、进程和焦点控件的后续文字输入暂缓；点击、导航和其他控件的事件到来前，先结算已确认的文字。文字身份与点击合并身份分别处理，不因第一次点击改变焦点而拆散双击。Windows 保留已验收的无独立 HWND 控件处理；macOS 用 AX 远程元素身份。
 
-密码保护只使用 UIA 明确的密码属性。密码或无法确认的控件不保留文本和相关图片。不匹配敏感词，不扫描整个 UIA 树，也不作通用隐私识别保证。
+密码保护只使用系统明确的安全字段属性（Windows UIA IsPassword；macOS AXSecureTextField）。密码或无法确认的控件不保留文本和相关图片。不匹配敏感词，不扫描整个树，不作通用隐私识别保证。
 
-每次事件只读取一次完整 UIA 上下文。截图前后只复核目标窗口/进程、控件 RuntimeId、密码属性和矩形，不再读取名称、角色或文本值；RuntimeId 无法读取时跳过该张图片，不影响已有动作。RuntimeId 同样支持没有独立 HWND 的控件。
+截图前后只复核目标身份、密码属性及必要几何，不重复读名称或文本。截图凭据留在原生适配层；共享层调度截图/OCR、控制队列和停止截止点。控件身份无法确认时跳过图片，不影响已有动作。
 
 点击和输入停顿可以保留对应控件区域的截图，绑定窗口、事件时间和实际采集时刻。停止不补拍旧事件。只有缺少控件提交文本时调用 OCR；结果是补充证据，不把拼音或 OCR 猜测直接当作已输入文字。显式视觉解析和示教复用同一上游 Perception 客户端、串行 worker、超时与空闲释放机制。
 
@@ -73,6 +74,6 @@ UIA 查询最多等待 750ms，与旧 cua-pywin 一致。点击按位置查询�
 
 ## 验证与来源
 
-`verify-teaching.ps1 -Bundle <dist> -Python <development-python> -AllowDesktop` 运行相关单元、原生测试窗口、MCP 和持久 CLI 测试。普通 cargo test 不向桌面发送输入。真实输入法、真实业务应用和 Windows 1903 仍按本地方案验收。
+公共回归位于 `cua-driver-core::teaching`；Windows 原生验收通过 `windows/verify-teaching.ps1` 执行。平台构建、权限和原生验证清单分别见 `windows/README.md`、`macos/README.md`。macOS 实际运行尚待可用 Mac，不以共享测试通过替代。
 
-钩子的有界入队和异步上下文处理参考已获授权的 Screenpipe：`b23efb5d876c04865e451155589783ad7911de4c`，`crates/screenpipe-a11y/src/platform/windows.rs`。保留 Screenpipe 及贡献者来源；其商业许可不因引用而改变。
+Windows 实现原参考 Screenpipe `b23efb5d876c04865e451155589783ad7911de4c` 的输入钩子处理；此次 macOS 参考的固定版本及吸收范围见 macOS 说明。用户已授权使用。保留原项目及贡献者来源，不将授权等同于更改上游许可证。

@@ -14,6 +14,12 @@ import tempfile
 import time
 
 
+def layout(bundle):
+    manifest = json.loads((bundle / "cua-package.json").read_text(encoding="utf-8"))
+    lock = json.loads((bundle / "upstream.lock.json").read_text(encoding="utf-8"))
+    return lock["targets"][manifest["target"]]
+
+
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -25,7 +31,7 @@ def write_json(path, value):
 
 def v4_comparison(candidate, legacy, destination):
     shutil.copytree(candidate, destination)
-    perception = destination / "perception"
+    perception = destination / layout(destination)["perception_dir"]
     model_source = legacy / "ch_PP-OCRv4_rec_mobile.onnx"
     keys_source = legacy / "ppocr_keys_v1.txt"
     assert digest(model_source) == "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b"
@@ -53,7 +59,7 @@ def v4_comparison(candidate, legacy, destination):
             item.update(name=model.name, sha256=digest(model))
     contract["dictionary"].update(name=dictionary.name, sha256=digest(dictionary))
     write_json(contract_path, contract)
-    package_path = destination / "cua-win-package.json"
+    package_path = destination / "cua-package.json"
     package = json.loads(package_path.read_text(encoding="utf-8"))
     package["files"] = {path.relative_to(destination).as_posix(): digest(path)
                         for path in sorted(destination.rglob("*"))
@@ -74,7 +80,7 @@ def distance(expected, actual):
 
 def parse(bundle, image, capture):
     start = time.perf_counter()
-    result = subprocess.run([str(bundle / "cua-win.exe"), "perception", "parse",
+    result = subprocess.run([str(bundle / layout(bundle)["binary"]), "perception", "parse",
                              "--image", str(image), "--capture", str(capture), "--json"],
                             capture_output=True, text=True, encoding="utf-8", timeout=90)
     elapsed = time.perf_counter() - start
@@ -94,7 +100,8 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     samples = json.loads(args.samples.read_text(encoding="utf-8"))
-    cache = Path(__file__).resolve().parent / ".cache"
+    cache = Path(__file__).resolve().parents[1] / ".cache"
+    cache.mkdir(exist_ok=True)
     results = {"scope": "same native v5 detector, different recognizers", "full_acceptance": False, "samples": []}
     with tempfile.TemporaryDirectory(prefix="ocr-comparison-", dir=cache) as temporary:
         temp = Path(temporary)
