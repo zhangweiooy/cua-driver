@@ -138,6 +138,9 @@ pub struct Captured {
 }
 pub trait Listener: Send {
     fn stop(&self);
+    fn failure_reason(&self) -> Option<&'static str> {
+        None
+    }
 }
 pub trait Backend: Send + Sync + 'static {
     fn check_available(&self) -> Result<(), String>;
@@ -228,6 +231,9 @@ pub fn run(
     let mut last_input_at = now();
     loop {
         if !accepting.load(Ordering::Acquire) && stopping.is_none() {
+            if let Some(failure) = hooks.failure_reason() {
+                *reason.lock().unwrap() = failure.into();
+            }
             hooks.stop();
             stopping = Some(Instant::now());
         }
@@ -700,6 +706,45 @@ mod tests {
     use super::*;
     use std::fs;
     pub(super) struct UnavailableBackend;
+    #[test]
+    fn listener_failure_is_not_reported_as_requested_stop() {
+        struct Failed;
+        impl Listener for Failed {
+            fn stop(&self) {}
+            fn failure_reason(&self) -> Option<&'static str> {
+                Some("native_listener_stopped")
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let output = Arc::new(SessionOutput::create(directory.path()).unwrap());
+        let timeline = Arc::new(Mutex::new(Timeline::new(
+            "test".into(),
+            "owner".into(),
+            "transport".into(),
+        )));
+        let backend: Arc<dyn Backend> = Arc::new(UnavailableBackend);
+        let evidence = Arc::new(evidence::EvidenceLog::new(
+            PerceptionClientHandle::fixed(crate::perception_client::PerceptionClient::unavailable()),
+            output,
+            backend.clone(),
+        ));
+        let (_tx, rx) = mpsc::sync_channel(1);
+        run(
+            backend,
+            rx,
+            Box::new(Failed),
+            timeline.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new("requested".into())),
+            Arc::new(Counters::default()),
+            vec![],
+            1,
+            evidence,
+        );
+        let state = timeline.lock().unwrap().snapshot(0, 100);
+        assert_eq!(state["termination_reason"], "native_listener_stopped");
+        assert_eq!(state["complete"], false);
+    }
     impl Backend for UnavailableBackend {
         fn check_available(&self) -> Result<(), String> {
             Err("teaching_desktop_unavailable".into())
