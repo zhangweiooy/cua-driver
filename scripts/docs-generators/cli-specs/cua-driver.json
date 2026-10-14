@@ -147,6 +147,14 @@
     {
      "command": "cua-driver call get_window_state '{\"pid\":844,\"window_id\":10725}' --screenshot-out-file state.png",
      "description": "Save the screenshot from a tool response"
+    },
+    {
+     "command": "cua-driver call get_window_state '{\"pid\":844,\"window_id\":10725,\"since\":\"s0000002a\"}'",
+     "description": "Read only what changed since an earlier snapshot_id"
+    },
+    {
+     "command": "cua-driver call get_window_state '{\"pid\":844,\"window_id\":10725,\"tree_format\":\"elements\"}'",
+     "description": "Return the structured elements instead of the markdown tree"
     }
    ],
    "flags": [],
@@ -1001,7 +1009,7 @@
        "type": "String"
       }
      ],
-     "discussion": "Cursor motion defaults are saved keys that apply to sessions started afterwards: cursor.motion.style (signature_arc, spring_settle, magnetic, comet_swoop, adaptive, classic), cursor.motion.timing (native, fitts, fixed) and cursor.motion.effects.<trail|glow|magnet|ripple|squish> (true, false). Use null for a key to clear it, or cursor.motion null to clear all. A start_session cursor_motion or a set_agent_cursor_motion call overrides the saved default.",
+     "discussion": "Cursor motion defaults are saved keys that apply to sessions started afterwards: cursor.motion.style (signature_arc, spring_settle, magnetic, comet_swoop, adaptive, classic), cursor.motion.timing (native, fitts, fixed) and cursor.motion.effects.<trail|glow|magnet|ripple|squish> (on, off, default). Use default for a key to clear it, or cursor.motion default to clear all. A start_session cursor_motion or a set_agent_cursor_motion call overrides the saved default.",
      "examples": [
       {
        "command": "cua-driver config set max_image_dimension 1568",
@@ -1014,6 +1022,10 @@
       {
        "command": "cua-driver config set cursor.motion.timing fitts",
        "description": "Scale cursor move time with distance and target size"
+      },
+      {
+       "command": "cua-driver config set cursor.motion.timing native",
+       "description": "Drop the 600 ms floor of the default steady timing"
       },
       {
        "command": "cua-driver config set cursor.motion.effects.trail true",
@@ -1177,7 +1189,7 @@
     },
     {
      "default_value": false,
-     "help": "Skip the 20-hour on-disk cache and force a GitHub request.",
+     "help": "Skip the 1-hour on-disk cache and look up the latest release again.",
      "name": "no-cache",
      "short_name": null
     }
@@ -2260,5 +2272,5 @@
   }
  ],
  "name": "cua-driver",
- "version": "0.34.1"
+ "version": "0.35.2"
 }

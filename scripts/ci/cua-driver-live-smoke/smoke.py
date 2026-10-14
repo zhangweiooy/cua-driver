@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""Live smoke for the cua-driver 0.34.x agent loop on a real desktop.
+"""Live smoke for the cua-driver agent loop on a real desktop.
 
 Starts a cua-driver daemon, talks MCP to it over `cua-driver mcp`, opens the
 fixture window (GTK3 on Linux, WinForms on Windows) and checks:
 
+  * get_window_state's default (lean) output and `full_output: true`,
   * the act-by-element_token loop (snapshot, click a token, fresh snapshot),
-  * display_only previews keep the agent's element tokens valid (8 preview
-    reads, then a click with the token from before the previews).
+  * `since` (a diff against an earlier snapshot, and `no change`),
+  * run_steps (one batch with an end-of-batch observation),
+  * run_script (listed by default; a script loop clicks by token; no I/O),
+  * set_value on a drop-down combo box and on an editable combo box,
+  * display_only previews (and plain screenshot-only reads) keep the agent's
+    element tokens valid.
 
-This is the 0.34 release line's copy of main's smoke
-(scripts/ci/cua-driver-live-smoke on main, #4769 and #4881), cut down to the
-0.34 surface: the lean read, `since`, run_actions, combo-box set_value and
-pid-less element_token checks exercise 0.35 changes and are not here, nor is
-the "plain screenshot-only read keeps tokens" check (that 0.35 change is not
-backported).
+Also checked: an element_token alone (no pid) acts and a stale one is
+refused as `stale_element_token`. Those are required: each is `pass` or
+`fail`. set_value on combo boxes (including delivery_mode foreground and an
+unknown option) is required on the platforms in COMBO_HARD and best effort
+elsewhere, where it is `pass`, `not_possible` (the driver refused with an
+explicit error) or `bug` (the driver claimed success, or failed internally
+after acting, and the app's change handler never saw the value).
 
 Writes results.json, summary.md and the raw responses to --out, and appends
 summary.md to $GITHUB_STEP_SUMMARY when set. Exits 1 when any check fails.
@@ -34,8 +40,15 @@ HERE = Path(__file__).resolve().parent
 TITLE = "Cua Live Smoke"
 WINDOWS = sys.platform == "win32"
 
-# Row roles, matched against the role words before the quoted name.
+# Row roles, matched against the role words before the quoted name. AT-SPI
+# names a GtkEntry `text` and a label `label`; UIA calls a text box `Edit`
+# and a label `Text`.
 BUTTON = r"(push )?button"
+ENTRY = r"edit" if WINDOWS else r"text|entry"
+COMBO = r"combo ?box"
+# Platforms where set_value on a combo box must reach the app's change
+# handler: a failure there fails the job instead of being recorded.
+COMBO_HARD = WINDOWS or sys.platform.startswith("linux")
 
 
 class Mcp:
@@ -183,6 +196,9 @@ def find_row(markdown, role, label=None, after=None):
     return None
 
 
+def first(*values):
+    return next((v for v in values if v is not None), None)
+
 
 def token(state, index):
     return f"{state.structured['snapshot_id']}:{index}"
@@ -240,17 +256,59 @@ def run_checks(smoke):
     # Wait until the accessibility tree is populated.
     deadline = time.monotonic() + 60
     while True:
-        first_read = smoke.read()
-        if find_row(tree(first_read), BUTTON, "Increment") is not None:
+        lean = smoke.read()
+        if find_row(tree(lean), BUTTON, "Increment") is not None:
             break
         if time.monotonic() >= deadline:
-            raise RuntimeError(
-                "fixture tree never showed the Increment button:\n" + first_read.text[:3000]
-            )
+            raise RuntimeError("fixture tree never showed the Increment button:\n" + lean.text[:3000])
         time.sleep(1)
-    print("---- tree ----\n" + tree(first_read) + "\n--------------", flush=True)
+    print("---- lean tree ----\n" + tree(lean) + "\n-------------------", flush=True)
 
-    # 1. Act by element_token, verify with a fresh snapshot.
+    # 1. Lean default.
+    s = lean.structured
+    problems = []
+    if lean.is_error:
+        problems.append("call failed: " + lean.first_line())
+    if s.get("tree_format") != "markdown":
+        problems.append(f"tree_format={s.get('tree_format')!r}")
+    if "elements" in s:
+        problems.append("structured `elements` present")
+    if not s.get("snapshot_id"):
+        problems.append("no snapshot_id")
+    if "element_token for row [N]" not in lean.text:
+        problems.append("no element_token hint in the text block")
+    smoke.record(
+        "get_window_state default is lean",
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"tree_format=markdown, no `elements`, snapshot_id={s.get('snapshot_id')}, "
+        f"{lean.size} chars",
+    )
+
+    # 2. full_output: true.
+    full = smoke.read(full_output=True)
+    f = full.structured
+    elements = f.get("elements") or []
+    problems = []
+    if full.is_error:
+        problems.append("call failed: " + full.first_line())
+    if not elements:
+        problems.append("no `elements`")
+    elif not any(e.get("element_token") for e in elements):
+        problems.append("`elements` carry no element_token")
+    if not f.get("tree_markdown"):
+        problems.append("no tree_markdown")
+    if full.size <= lean.size:
+        problems.append(f"full ({full.size} chars) not larger than lean ({lean.size})")
+    smoke.record(
+        "get_window_state full_output:true returns the full tree",
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"{len(elements)} elements + tree_markdown, {full.size} chars vs lean {lean.size} "
+        f"({full.size / max(lean.size, 1):.1f}x)",
+    )
+
+    # 3. Act by element_token, verify with a fresh snapshot.
     before = smoke.read()
     increment = find_row(tree(before), BUTTON, "Increment")
     click_args = {"pid": smoke.pid, "element_token": token(before, increment)}
@@ -267,8 +325,122 @@ def run_checks(smoke):
                      f"click element_token={click_args['element_token']} -> fresh snapshot "
                      f"{after.structured.get('snapshot_id')} shows 'Count: 1'")
 
-    # 2. display_only previews leave the agent's snapshot alone.
+    # 4. since: diff against the pre-click snapshot, then `no change`.
+    since_id = before.structured["snapshot_id"]
+    diff = smoke.read(since=since_id)
+    d = diff.structured
+    diff_text = d.get("tree_diff") or ""
+    problems = []
+    if diff.is_error:
+        problems.append("call failed: " + diff.first_line())
+    if d.get("since_status") != "diff":
+        problems.append(f"since_status={d.get('since_status')!r}")
+    if "Count: 1" not in diff_text:
+        problems.append("diff does not mention 'Count: 1'")
+    if "tree_markdown" in d:
+        problems.append("diff read still carries the full tree_markdown")
+    still = smoke.read(since=d.get("snapshot_id") or "")
+    if still.structured.get("since_status") != "no_change":
+        problems.append(
+            f"second read since={d.get('snapshot_id')} gave "
+            f"since_status={still.structured.get('since_status')!r}, expected 'no_change'"
+        )
+    smoke.record(
+        "since returns a diff, then no_change",
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"since={since_id}: diff_counts={d.get('diff_counts')}, {diff.size} chars vs "
+        f"full read {after.size}; repeat read: no_change",
+    )
+
+    # 5. run_steps: set a field, click Apply, click Increment, observe once.
+    state = smoke.read()
+    md = tree(state)
+    targets = {
+        "entry": first(find_row(md, ENTRY, "Name field"), find_row(md, ENTRY)),
+        "apply": find_row(md, BUTTON, "Apply"),
+        "increment": find_row(md, BUTTON, "Increment"),
+    }
+    if None in targets.values():
+        smoke.record("run_steps batch", "fail", f"fixture rows not found: {targets}")
+    else:
+        batch_args = {
+            "steps": [
+                {"tool": "set_value", "args": {"pid": smoke.pid, "element_token": token(state, targets["entry"]), "value": "Ada"}},
+                {"tool": "click", "args": {"pid": smoke.pid, "element_token": token(state, targets["apply"])}},
+                {"tool": "click", "args": {"pid": smoke.pid, "element_token": token(state, targets["increment"])}},
+            ],
+            "observe": {"pid": smoke.pid, "window_id": smoke.window_id},
+        }
+        batch = smoke.call("run_steps", batch_args)
+        b = batch.structured
+        observed = ((b.get("observation") or {}).get("state") or {}).get("tree_markdown") or ""
+        problems = []
+        if batch.is_error or not b.get("ok"):
+            problems.append(f"batch failed: {json.dumps(b.get('steps'))[:600]} {batch.first_line()}")
+        if b.get("executed") != 3:
+            problems.append(f"executed={b.get('executed')}")
+        if not (b.get("observation") or {}).get("ok"):
+            problems.append("no observation")
+        lagged = [n for n in ("Applied: Ada", "Count: 2") if n not in observed]
+        if lagged and not problems:
+            fresh = smoke.wait_for_text("Count: 2")
+            missing = [n for n in lagged if n not in tree(fresh)]
+            if missing:
+                problems.append(f"neither the observation nor a fresh read shows {missing}")
+        smoke.record(
+            "run_steps batch (set_value + 2 clicks + observe)",
+            "fail" if problems else "pass",
+            "; ".join(problems)
+            or "3/3 steps ok; "
+            + ("observation shows 'Applied: Ada' and 'Count: 2'" if not lagged
+               else f"observation lagged on {lagged}, fresh read confirms"),
+        )
+
+    # 6. set_value on combo boxes.
+    combo_check(smoke, "Color", "Blue", editable=False)
+    combo_check(smoke, "Size", "Large", editable=True)
+    unknown_option_check(smoke)
+
+    # 7. element_token alone, no pid: the token names its pid.
+    token_without_pid_check(smoke)
+
+    # 7a. display_only previews leave the agent's snapshot alone.
     display_only_check(smoke)
+
+    # 7b. Lean-read ergonomics from the v035 bench: since:"latest", a bare row
+    # number as element_token, run_steps observe:true, zoom x/y/width/height.
+    lean_read_ergonomics_check(smoke)
+
+    # 7c. The pre-0.35 name run_actions still runs, unlisted, with a note.
+    renamed_tool_alias_check(smoke)
+
+    # 7d. run_script is on by default: listed, runs a loop, has no I/O.
+    run_script_check(smoke)
+
+    # 8. The drop-down combo with delivery_mode foreground (last because a
+    # broken route may leave a popup open), then a click by token must still
+    # land, which it does not while a popup holds the pointer grab.
+    state = smoke.read()
+    combo = find_row(tree(state), COMBO, "Color")
+    status, evidence = set_value_attempt(
+        smoke, state, combo, "Color", "Green", delivery_mode="foreground"
+    )
+    if status == "pass":
+        landed, detail = click_still_lands(smoke)
+        if not landed:
+            status = "bug"
+        evidence += "; " + detail
+    smoke.record(
+        "set_value on the drop-down combo box with delivery_mode foreground",
+        hard(status),
+        evidence,
+    )
+
+
+def hard(status):
+    """A combo-box status under COMBO_HARD: anything but pass fails."""
+    return "fail" if COMBO_HARD and status != "pass" else status
 
 
 def count_value(markdown):
@@ -276,12 +448,57 @@ def count_value(markdown):
     return int(match.group(1)) if match else None
 
 
+def click_still_lands(smoke):
+    """Click Increment by token and check the count moves."""
+    state = smoke.read()
+    before = count_value(tree(state))
+    increment = find_row(tree(state), BUTTON, "Increment")
+    if before is None or increment is None:
+        return False, "no Increment button or Count label to probe with"
+    smoke.call("click", {"pid": smoke.pid, "element_token": token(state, increment)})
+    after = smoke.wait_for_text(f"Count: {before + 1}")
+    if f"Count: {before + 1}" in tree(after):
+        return True, f"a following click by token still lands (Count: {before + 1})"
+    return False, f"a following click by token did not land (Count stayed {before})"
+
+
+def token_without_pid_check(smoke):
+    check = "act by element_token without pid; a stale token is refused"
+    state = smoke.read()
+    before = count_value(tree(state))
+    increment = find_row(tree(state), BUTTON, "Increment")
+    args = {"element_token": token(state, increment)}
+    click = smoke.call("click", args)
+    after = smoke.wait_for_text(f"Count: {(before or 0) + 1}")
+    problems = []
+    if click.is_error:
+        problems.append(f"click {json.dumps(args)} -> {click.first_line()}")
+    elif f"Count: {(before or 0) + 1}" not in tree(after):
+        problems.append(f"click ok but the count did not move from {before}")
+    stale_args = {"element_token": "s0fffffff:0", "value": "x"}
+    stale = smoke.call("set_value", stale_args)
+    code = (stale.structured.get("refusal") or {}).get("code")
+    if not stale.is_error or code != "stale_element_token":
+        problems.append(
+            f"set_value {json.dumps(stale_args)} -> is_error={stale.is_error}, "
+            f"refusal code {code!r}: {stale.first_line()}"
+        )
+    smoke.record(
+        check,
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"click {json.dumps(args)} -> Count: {(before or 0) + 1}; a stale token -> "
+        f"stale_element_token ({stale.first_line()})",
+    )
+
+
 DISPLAY_ONLY_READS = 8
 
 
 def display_only_check(smoke):
     """A preview polling display_only reads (T3 Code's picture-in-picture)
-    must not stale the agent's element tokens."""
+    must not stale the agent's element tokens; neither may a plain
+    screenshot-only read."""
     check = f"tokens stay valid after {DISPLAY_ONLY_READS} display_only reads"
     problems = []
     listed = smoke.mcp.request("tools/list", {})
@@ -319,6 +536,12 @@ def display_only_check(smoke):
     if not refused.is_error or "display_only requires include_accessibility_tree:false" not in refused.text:
         problems.append(f"display_only with a tree walk was not refused: {refused.first_line()}")
 
+    plain = smoke.read(include_accessibility_tree=False)
+    if plain.structured.get("invalidated_snapshot_ids"):
+        problems.append(
+            f"a plain screenshot-only read invalidated {plain.structured['invalidated_snapshot_ids']}"
+        )
+
     args = {"pid": smoke.pid, "element_token": token(state, increment)}
     click = smoke.call("click", args)
     after = smoke.wait_for_text(f"Count: {(before or 0) + 1}")
@@ -331,9 +554,206 @@ def display_only_check(smoke):
         "fail" if problems else "pass",
         "; ".join(problems)
         or f"schema advertises display_only; {DISPLAY_ONLY_READS} display_only reads of "
-        f"snapshot {snapshot} carried no snapshot_id/capture_id; a tree walk with "
-        f"display_only was refused; click {args['element_token']} -> Count: {(before or 0) + 1}",
+        f"snapshot {snapshot} carried no snapshot_id/capture_id; a plain screenshot-only "
+        f"read invalidated nothing; click {args['element_token']} -> Count: {(before or 0) + 1}",
     )
+
+
+def lean_read_ergonomics_check(smoke):
+    check = "since:latest, bare row token, run_steps observe:true, zoom x/y/width/height, scroll dy"
+    problems = []
+    smoke.read()
+    latest = smoke.read(since="latest")
+    if latest.structured.get("since_status") not in ("diff", "no_change"):
+        problems.append(f"since=latest gave since_status={latest.structured.get('since_status')!r}")
+
+    state = smoke.read()
+    before = count_value(tree(state))
+    increment = find_row(tree(state), BUTTON, "Increment")
+    row_args = {"pid": smoke.pid, "window_id": smoke.window_id, "element_token": str(increment)}
+    click = smoke.call("click", row_args)
+    after = smoke.wait_for_text(f"Count: {(before or 0) + 1}")
+    if click.is_error:
+        problems.append(f"click {json.dumps(row_args)} -> {click.first_line()}")
+    elif f"Count: {(before or 0) + 1}" not in tree(after):
+        problems.append(f"bare row click ok but the count did not move from {before}")
+
+    increment = find_row(tree(after), BUTTON, "Increment")
+    batch = smoke.call("run_steps", {
+        "steps": [{"tool": "click", "args": {"pid": smoke.pid, "window_id": smoke.window_id,
+                                             "element_token": token(after, increment)}}],
+        "observe": True,
+    })
+    observed = ((batch.structured.get("observation") or {}).get("state") or {})
+    if batch.is_error or observed.get("since_status") not in ("diff", "no_change"):
+        problems.append(
+            f"run_steps observe:true -> is_error={batch.is_error}, "
+            f"since_status={observed.get('since_status')!r}: {batch.first_line()}"
+        )
+
+    smoke.read()
+    zoom = smoke.call("zoom", {"pid": smoke.pid, "window_id": smoke.window_id,
+                               "x": "0", "y": "0", "width": "120", "height": "60"})
+    if zoom.is_error and "unknown argument" in zoom.text:
+        problems.append(f"zoom x/y/width/height -> {zoom.first_line()}")
+    scrolled = smoke.call("scroll", {"pid": smoke.pid, "window_id": smoke.window_id,
+                                     "x": 40, "y": 40, "dy": "3"})
+    if scrolled.is_error and ("unknown argument" in scrolled.text or "dx/dy" in scrolled.text):
+        problems.append(f"scroll dy -> {scrolled.first_line()}")
+    smoke.record(
+        check,
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"scroll dy:'3' -> {'ok' if not scrolled.is_error else scrolled.first_line()}; "
+        f"since=latest -> {latest.structured.get('since_status')}; click element_token "
+        f"{str(increment)!r} + window_id -> Count moved; observe:true -> "
+        f"{observed.get('since_status')}; zoom x/y/width/height -> "
+        f"{'ok' if not zoom.is_error else zoom.first_line()}",
+    )
+
+
+def renamed_tool_alias_check(smoke):
+    """run_actions was renamed run_steps: only run_steps is listed, and a
+    call to the old name still runs and ends with a deprecation note."""
+    check = "run_actions alias: unlisted, runs, deprecation note"
+    problems = []
+    listed = smoke.mcp.request("tools/list", {})
+    names = {t.get("name") for t in (listed.get("result") or {}).get("tools") or []}
+    if "run_steps" not in names:
+        problems.append("tools/list lacks run_steps")
+    if "run_actions" in names:
+        problems.append("tools/list still lists run_actions")
+
+    state = smoke.read()
+    increment = find_row(tree(state), BUTTON, "Increment")
+    if increment is None:
+        problems.append("fixture Increment row not found")
+    else:
+        old = smoke.call("run_actions", {
+            "steps": [{"tool": "click", "args": {"pid": smoke.pid, "window_id": smoke.window_id,
+                                                 "element_token": token(state, increment)}}],
+        })
+        if old.is_error:
+            problems.append(f"run_actions -> {old.first_line()}")
+        if "`run_actions` is deprecated" not in old.text or "`run_steps`" not in old.text:
+            problems.append(f"no deprecation note in the run_actions result: {old.text[-300:]!r}")
+    smoke.record(check, "fail" if problems else "pass", "; ".join(problems) or "listed: run_steps only; run_actions ran with the note")
+
+
+def run_script_check(smoke):
+    """run_script is listed by default, a script clicks Increment twice in a
+    loop, and the sandbox has no require, process or fetch."""
+    check = "run_script: listed by default, loop of clicks, sandboxed"
+    problems = []
+    listed = smoke.mcp.request("tools/list", {})
+    names = {t.get("name") for t in (listed.get("result") or {}).get("tools") or []}
+    if "run_script" not in names:
+        problems.append("tools/list lacks run_script")
+
+    state = smoke.read()
+    before = count_value(tree(state))
+    increment = find_row(tree(state), BUTTON, "Increment")
+    if before is None or increment is None:
+        problems.append("fixture Increment row or Count label not found")
+    else:
+        script = (
+            f"const app = await cua.getApp({{pid: {smoke.pid}, windowId: {smoke.window_id}}});\n"
+            f"for (let i = 0; i < 2; i++) await app.click({json.dumps(token(state, increment))});\n"
+            "return {sandbox: [typeof require, typeof process, typeof fetch].join(',')};"
+        )
+        ran = smoke.call("run_script", {"script": script, "timeout_ms": 30000})
+        value = (ran.structured or {}).get("value") or {}
+        if ran.is_error:
+            problems.append(f"run_script -> {ran.text[:600]!r}")
+        elif value.get("sandbox") != "undefined,undefined,undefined":
+            problems.append(f"sandbox exposes {value.get('sandbox')!r}")
+        after = smoke.wait_for_text(f"Count: {before + 2}")
+        if f"Count: {before + 2}" not in tree(after):
+            problems.append(f"Count went {before} -> {count_value(tree(after))}, expected {before + 2}")
+    smoke.record(
+        check,
+        "fail" if problems else "pass",
+        "; ".join(problems)
+        or f"listed; 2 clicks in a script loop moved Count {before} -> {before + 2}; "
+        "require/process/fetch undefined",
+    )
+
+
+def unknown_option_check(smoke):
+    """set_value with an option the drop-down does not have is refused and
+    changes nothing."""
+    check = "set_value on a drop-down combo box refuses an unknown option"
+    state = smoke.read()
+    combo = find_row(tree(state), COMBO, "Color")
+    shown = re.search(r"Color: (\w+)", tree(state))
+    args = {"pid": smoke.pid, "element_token": token(state, combo), "value": "Purple"}
+    result = smoke.call("set_value", args)
+    fresh = smoke.read()
+    code = result.structured.get("code")
+    if not result.is_error:
+        status, evidence = "bug", f"set_value 'Purple' reported success: {result.first_line()}"
+    elif shown and shown.group(0) not in tree(fresh):
+        status, evidence = "bug", f"refused ({result.first_line()}) but the label changed"
+    elif code != "option_not_found":
+        status, evidence = "not_possible", f"refused with code {code!r}: {result.first_line()}"
+    else:
+        status, evidence = "pass", f"option_not_found: {result.first_line()}"
+    smoke.record(check, hard(status), evidence)
+
+
+def row_text(markdown, index):
+    return next((text for i, text in rows(markdown) if i == index), "")
+
+
+def set_value_attempt(smoke, state, index, name, value, **extra):
+    """set_value on row `index`, then a fresh read for '<name>: <value>'.
+    Returns (status, evidence): pass, not_possible (explicit refusal), or
+    bug (the call claimed success, or failed internally after acting, and the
+    app's change handler did not see the new value)."""
+    args = {"pid": smoke.pid, "element_token": token(state, index), "value": value}
+    args.update(extra)
+    result = smoke.call("set_value", args)
+    expected = f"{name}: {value}"
+    fresh = smoke.wait_for_text(expected, timeout=5 if result.is_error else 10)
+    if expected in tree(fresh):
+        return "pass", f"set_value on row [{index}] -> fresh snapshot shows '{expected}'"
+    control = row_text(tree(fresh), index)
+    if result.is_error and result.structured.get("code") != "action_outcome_mismatch":
+        return "not_possible", f"[{index}] {result.first_line()}"
+    claim = ("failed internally: " if result.is_error else "reported success: ") + result.first_line()
+    return "bug", (
+        f"set_value{' ' + json.dumps(extra) if extra else ''} on row [{index}] {claim}; "
+        f"the control now reads `{control}` but the app's change handler never ran "
+        f"(no '{expected}')"
+    )
+
+
+def combo_check(smoke, name, value, editable):
+    """set_value on a combo box: required under COMBO_HARD, otherwise best
+    effort (pass, not_possible or bug, never failing the job)."""
+    kind = "an editable combo box" if editable else "a drop-down combo box"
+    check = f"set_value on {kind} ({name} -> {value})"
+    state = smoke.read()
+    md = tree(state)
+    combo = find_row(md, COMBO, name)
+    if combo is None:
+        smoke.record(check, "fail", f"no combo row named {name!r} in the tree")
+        return
+    candidates = [combo]
+    if editable:
+        # GTK exposes the entry as a child row; UIA exposes an Edit child.
+        child = find_row(md, ENTRY, after=combo)
+        if child is not None:
+            candidates.append(child)
+    outcomes = []
+    for index in candidates:
+        status, evidence = set_value_attempt(smoke, state, index, name, value)
+        outcomes.append((status, evidence))
+        if status == "pass":
+            break
+        state = smoke.read()
+    status = next((s for s in ("pass", "bug", "not_possible") if any(o[0] == s for o in outcomes)))
+    smoke.record(check, hard(status), "; ".join(e for st, e in outcomes if st == status))
 
 
 def write_reports(smoke, out, platform_name):
@@ -343,7 +763,10 @@ def write_reports(smoke, out, platform_name):
     lines = [
         f"## cua-driver live smoke: {platform_name}",
         "",
-        "`fail` fails the job.",
+        "`fail` fails the job. `bug` (a best-effort check where the driver claimed "
+        "success, or failed internally after acting, without the app seeing the "
+        "change) and `not_possible` (an explicit refusal) are recorded only. "
+        f"Combo-box checks are {'required' if COMBO_HARD else 'best effort'} here.",
         "",
         "| Check | Result | Evidence |",
         "| --- | --- | --- |",
@@ -351,6 +774,8 @@ def write_reports(smoke, out, platform_name):
     for r in smoke.results:
         evidence = r["evidence"].replace("|", "\\|").replace("\n", " ")
         lines.append(f"| {r['check']} | {r['status']} | {evidence} |")
+        if r["status"] == "bug" and os.environ.get("GITHUB_ACTIONS"):
+            print(f"::warning title=cua-driver bug: {r['check']}::{evidence}")
     summary = "\n".join(lines) + "\n"
     (out / "summary.md").write_text(summary, encoding="utf-8")
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")

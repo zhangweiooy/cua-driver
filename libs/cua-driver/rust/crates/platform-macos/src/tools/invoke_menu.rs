@@ -93,6 +93,81 @@ fn menu_title_key(title: &str) -> String {
     title.trim().replace("...", "\u{2026}")
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TitleMatch {
+    One(usize),
+    Ambiguous,
+    None,
+}
+
+/// Find a path segment among the titles of one menu level: an exact title
+/// first, then a title that differs only in letter case. Anything looser
+/// (word overlap, prefixes) is left to the caller, who sees the titles in
+/// the error, because a wrong guess would run a different command.
+fn pick_title(titles: &[String], segment: &str) -> TitleMatch {
+    let wanted = menu_title_key(segment);
+    let pick = |same: &dyn Fn(&str) -> bool| {
+        let mut hits = titles
+            .iter()
+            .enumerate()
+            .filter(|(_, title)| same(&menu_title_key(title)))
+            .map(|(index, _)| index);
+        match (hits.next(), hits.next()) {
+            (Some(index), None) => TitleMatch::One(index),
+            (Some(_), Some(_)) => TitleMatch::Ambiguous,
+            _ => TitleMatch::None,
+        }
+    };
+    match pick(&|title| title == wanted) {
+        TitleMatch::None => {
+            let wanted = wanted.to_lowercase();
+            pick(&|title| title.to_lowercase() == wanted)
+        }
+        found => found,
+    }
+}
+
+/// Most items a missed segment lists, so a long menu cannot flood the reply.
+const MAX_LISTED_TITLES: usize = 40;
+
+/// A missed segment names what was asked for, where, and the items that are
+/// there, so the next call can use the real title instead of a full tree
+/// read (LibreOffice calls it "To Next Sheet", not "Next Sheet").
+fn missing_segment_error(depth: usize, prefix: &[String], titles: &[String]) -> String {
+    let wanted = &prefix[depth];
+    let location = if depth == 0 {
+        "in the menu bar".to_owned()
+    } else {
+        format!("under \"{}\"", prefix[..depth].join(" > "))
+    };
+    let mut items: Vec<&str> = titles
+        .iter()
+        .map(|title| title.trim())
+        .filter(|title| !title.is_empty())
+        .collect();
+    items.dedup();
+    if items.is_empty() {
+        return format!(
+            "invoke_menu: path segment {depth} \"{wanted}\" was not found {location}, which lists no titled items (the app may fill this menu only while it is open)"
+        );
+    }
+    let more = items.len().saturating_sub(MAX_LISTED_TITLES);
+    let listed = items
+        .iter()
+        .take(MAX_LISTED_TITLES)
+        .map(|title| format!("\"{title}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let more = if more > 0 {
+        format!(" and {more} more")
+    } else {
+        String::new()
+    };
+    format!(
+        "invoke_menu: path segment {depth} \"{wanted}\" was not found {location}. Items there: {listed}{more}"
+    )
+}
+
 unsafe fn resolve_exact_prefix(
     menu_bar: AXUIElementRef,
     prefix: &[String],
@@ -106,29 +181,27 @@ unsafe fn resolve_exact_prefix(
             CFRelease(current as CFTypeRef);
         }
 
-        let wanted = menu_title_key(segment);
-        let mut matches = Vec::new();
-        for child in children {
-            let title = copy_string_attr(child, "AXTitle").unwrap_or_default();
-            if menu_title_key(&title) == wanted {
-                matches.push(child);
+        let titles: Vec<String> = children
+            .iter()
+            .map(|&child| copy_string_attr(child, "AXTitle").unwrap_or_default())
+            .collect();
+        let picked = pick_title(&titles, segment);
+        let mut chosen = None;
+        for (index, child) in children.into_iter().enumerate() {
+            if matches!(picked, TitleMatch::One(i) if i == index) {
+                chosen = Some(child);
             } else {
                 CFRelease(child as CFTypeRef);
             }
         }
 
-        if matches.len() != 1 {
-            let match_count = matches.len();
-            for candidate in matches {
-                CFRelease(candidate as CFTypeRef);
+        match (picked, chosen) {
+            (TitleMatch::One(_), Some(child)) => current = child,
+            (TitleMatch::Ambiguous, _) => {
+                return Err(format!("invoke_menu: path segment {depth} is ambiguous"));
             }
-            return Err(if match_count == 0 {
-                format!("invoke_menu: path segment {depth} was not found")
-            } else {
-                format!("invoke_menu: path segment {depth} is ambiguous")
-            });
+            _ => return Err(missing_segment_error(depth, prefix, &titles)),
         }
-        current = matches.pop().expect("one exact match");
         owns_current = true;
     }
 
@@ -461,6 +534,77 @@ fn exact_window_is_ready(
     frontmost_pid == Some(target_pid) && focused_window_id == Some(target_window_id)
 }
 
+/// The item could not be invoked with its app in the background. Activating
+/// the app would take the user's front window, so refuse and name the route.
+fn background_unavailable(reason: String) -> ToolResult {
+    let message = format!(
+        "{reason}. invoke_menu does not activate a background app: macOS keeps this menu item \
+         unavailable while the app is behind the user's window. If the user allows it, call \
+         bring_to_front for this window first, then invoke_menu, or send the app's keyboard \
+         shortcut with hotkey and delivery_mode:\"foreground\". A background hotkey does not \
+         help: the disabled item ignores its shortcut too. Otherwise use the control in the \
+         window."
+    );
+    ToolResult::error(message.clone()).with_structured(serde_json::json!({
+        "status": "refused",
+        "code": "background_unavailable",
+        "refusal": { "code": "background_unavailable", "message": message }
+    }))
+}
+
+/// Resolve the whole path from the app's live menu bar without opening any
+/// level, then perform the final item's action. Used for a background app:
+/// opening a menu-bar menu would take key focus and draw over the user's
+/// front app.
+unsafe fn invoke_path_in_background(
+    pid: i32,
+    window_id: u32,
+    path: &[String],
+) -> Result<(), String> {
+    let app = AXUIElementCreateApplication(pid);
+    if app.is_null() {
+        return Err("invoke_menu: target application is unavailable".into());
+    }
+    set_messaging_timeout(app);
+    let menu_bar = copy_element_attr(app, "AXMenuBar");
+    CFRelease(app as CFTypeRef);
+    let menu_bar = menu_bar.ok_or_else(|| "invoke_menu: target exposes no AXMenuBar".to_owned())?;
+    set_messaging_timeout(menu_bar);
+    let target = resolve_exact_prefix(menu_bar, path);
+    CFRelease(menu_bar as CFTypeRef);
+    let target = target?;
+    set_messaging_timeout(target);
+    let result = (|| {
+        // AppKit validates menu items against the key window. Make the target
+        // window AppKit-key without raising it or touching the user's window
+        // (the focus record only), so items that need a key window enable.
+        if copy_bool_attr(target, "AXEnabled") == Some(false)
+            && crate::input::skylight::activate_without_raise_with(pid, window_id, false)
+        {
+            std::thread::sleep(Duration::from_millis(120));
+        }
+        if copy_bool_attr(target, "AXEnabled") == Some(false) {
+            return Err(format!(
+                "invoke_menu: path segment {} is disabled while the app is in the background",
+                path.len().saturating_sub(1)
+            ));
+        }
+        let actions = copy_action_names(target);
+        let action = choose_action(&actions, true).ok_or_else(|| {
+            "invoke_menu: the final menu item has no usable native menu action".to_owned()
+        })?;
+        let error = perform_action(target, action);
+        if error != kAXErrorSuccess {
+            return Err(format!(
+                "invoke_menu: native action for the final menu item failed with AX error {error}"
+            ));
+        }
+        Ok(())
+    })();
+    CFRelease(target as CFTypeRef);
+    result
+}
+
 fn refusal(message: String) -> ToolResult {
     ToolResult::error(message.clone()).with_structured(serde_json::json!({
         "status": "refused",
@@ -475,6 +619,10 @@ impl Tool for InvokeMenuTool {
     }
 
     async fn invoke(&self, args: Value) -> ToolResult {
+        // The menu bar belongs to the app: with only a pid, use its focused
+        // window.
+        let mut args = args;
+        super::default_window_for_pid(&mut args);
         let input: InvokeMenuInput =
             match cua_driver_core::tool_args::parse_typed_input("invoke_menu", args) {
                 Ok(input) => input,
@@ -497,6 +645,49 @@ impl Tool for InvokeMenuTool {
             .any(|window| window.pid == pid && window.window_id == window_id)
         {
             return refusal("invoke_menu: window_id does not belong to pid".into());
+        }
+
+        // A background target: invoke the item without activating the app or
+        // raising its window. When macOS keeps the item unavailable to a
+        // background app, refuse and say so instead of activating it.
+        let target_in_front = tokio::task::spawn_blocking(move || {
+            live_frontmost_app().or_else(crate::apps::frontmost_pid) == Some(pid)
+        })
+        .await
+        .unwrap_or(false);
+        if !target_in_front {
+            let background_path = path.clone();
+            let outcome = tokio::task::spawn_blocking(move || {
+                let _key_focus = crate::key_focus_guard::protect(pid);
+                unsafe { invoke_path_in_background(pid, window_id, &background_path) }
+            })
+            .await;
+            return match outcome {
+                Ok(Ok(())) => ToolResult::text(
+                    "Invoked the native menu item through accessibility with the app in the background (not activated); verify the command's semantic effect from fresh state.",
+                )
+                .with_action_record(
+                    ActionExecutionRecord::builder(
+                        ActionEffect::Unverifiable,
+                        ActionTransport::MacosAxAction,
+                        RequestedDelivery::Background,
+                    )
+                    .actual_delivery(ActualDelivery::Background)
+                    .evidence(ActionEvidence {
+                        kind: EvidenceKind::NativeApiResult,
+                        detail: "Every menu hop resolved uniquely without opening it and AX accepted the final action".into(),
+                    })
+                    .build()
+                    .expect("invoke_menu record is valid"),
+                ),
+                // Only a disabled item is a background limit; a missing or
+                // ambiguous path is the same refusal as in the foreground.
+                Ok(Err(error)) if error.contains("while the app is in the background") => {
+                    background_unavailable(error)
+                }
+                Ok(Err(error)) => refusal(error),
+                Err(error) => refusal(format!("invoke_menu: blocking task failed: {error}")),
+            };
         }
 
         let outcome = tokio::task::spawn_blocking(move || {
@@ -556,6 +747,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_background_menu_refusal_names_the_code_and_the_route() {
+        let result = background_unavailable("invoke_menu: path segment 1 is disabled".into());
+        assert_eq!(result.is_error, Some(true));
+        let structured = result.structured_content.expect("structured refusal");
+        assert_eq!(structured["code"], "background_unavailable");
+        let message = structured["refusal"]["message"].as_str().unwrap();
+        assert!(message.contains("does not activate a background app"));
+        assert!(message.contains("bring_to_front"));
+        assert!(message.contains("delivery_mode:\"foreground\""));
+        assert!(message.contains("A background hotkey does not help"));
+    }
+
+    #[test]
     fn path_normalization_rejects_empty_segments() {
         assert_eq!(
             normalized_path(vec![" Window ".into(), " Left ".into()]).unwrap(),
@@ -583,6 +787,38 @@ mod tests {
             assert!(failure_after_press(error(), "File", unconfirmed)
                 .ends_with("The File menu this call opened may still be open: press escape on the window before other input."));
         }
+    }
+
+    #[test]
+    fn segments_match_exactly_then_ignoring_case() {
+        let titles: Vec<String> = ["To Next Sheet", "To Previous Sheet", "", "Go to Sheet..."]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(pick_title(&titles, "To Next Sheet"), TitleMatch::One(0));
+        assert_eq!(pick_title(&titles, "to next sheet"), TitleMatch::One(0));
+        assert_eq!(pick_title(&titles, "Go to Sheet…"), TitleMatch::One(3));
+        assert_eq!(pick_title(&titles, "Next Sheet"), TitleMatch::None);
+        let twins: Vec<String> = ["Copy", "copy"].map(String::from).to_vec();
+        assert_eq!(pick_title(&twins, "Copy"), TitleMatch::One(0));
+        assert_eq!(pick_title(&twins, "COPY"), TitleMatch::Ambiguous);
+    }
+
+    #[test]
+    fn a_missed_segment_lists_the_items_at_its_level() {
+        let path: Vec<String> = ["Sheet", "Navigate", "Next Sheet"]
+            .map(String::from)
+            .to_vec();
+        let titles: Vec<String> = ["To Next Sheet", "", "To Previous Sheet"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            missing_segment_error(2, &path, &titles),
+            "invoke_menu: path segment 2 \"Next Sheet\" was not found under \"Sheet > Navigate\". Items there: \"To Next Sheet\", \"To Previous Sheet\""
+        );
+        assert!(missing_segment_error(0, &path, &["File".into()]).contains("in the menu bar"));
+        assert!(missing_segment_error(1, &path, &[]).contains("lists no titled items"));
+        let many: Vec<String> = (0..45).map(|i| format!("Item {i}")).collect();
+        assert!(missing_segment_error(1, &path, &many).ends_with("and 5 more"));
     }
 
     #[test]
