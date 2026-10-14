@@ -229,7 +229,7 @@ pub struct TextCapture {
     pub pending: Option<Raw>,
 }
 fn is_text_input(kind: Kind) -> bool {
-    matches!(kind, Kind::Key(key, mods) if matches!(key, Key::Composition | Key::Paste)
+    matches!(kind, Kind::Key(key, mods) if matches!(key, Key::Composition | Key::Paste | Key::TextInput)
         || (mods & 14 == 0 && matches!(key, Key::Character(_) | Key::Text))
         || (mods & 2 != 0 && key == Key::Character('V')))
 }
@@ -319,6 +319,42 @@ mod tests {
             focus: "field-a".into(),
             value: value.map(str::to_owned),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn platform_text_intent_preserves_modifier_shortcut_semantics() {
+        for (key, mods, expected) in [
+            (Key::TextInput, 4, true),
+            (Key::TextInput, 5, true),
+            (Key::Paste, 8, true),
+            (Key::Character('V'), 2, true),
+            (Key::Character('V'), 4, false),  // Windows Alt+V
+            (Key::Character('A'), 12, false), // Command+Option shortcut
+            (Key::Character('A'), 6, false),
+        ] {
+            let mut capture = TextCapture::default();
+            let mut missing = 0;
+            capture.observe(
+                text_sample(Kind::Focus, 0),
+                &text_context(Some("")),
+                None,
+                0,
+                &mut missing,
+            );
+            let committed = capture.observe(
+                text_sample(Kind::Key(key, mods), 10),
+                &text_context(Some("√")),
+                None,
+                10,
+                &mut missing,
+            );
+            assert_eq!(
+                committed.map(|(_, text)| text),
+                expected.then(|| "√".to_owned()),
+                "{key:?}, {mods}"
+            );
+            assert_eq!(missing, 0);
         }
     }
 

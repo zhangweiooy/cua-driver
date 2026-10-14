@@ -86,6 +86,8 @@ pub enum Key {
     Composition,
     Paste,
     Text,
+    /// The backend identified text entry even with a layout modifier held.
+    TextInput,
 }
 impl Key {
     fn name(self) -> Option<String> {
@@ -151,6 +153,11 @@ pub trait Backend: Send + Sync + 'static {
         counters: Arc<Counters>,
         excluded: Vec<u32>,
     ) -> Result<Box<dyn Listener>, String>;
+    /// Resolve queued input on the consumer thread, before context and lookahead.
+    /// Backends that already captured identity return the event unchanged.
+    fn resolve_input(&self, event: Raw) -> Option<Raw> {
+        Some(event)
+    }
     fn current(&self) -> Option<Raw>;
     fn context(&self, event: Raw) -> Context;
     fn is_transient(&self, event: Raw) -> bool;
@@ -229,6 +236,12 @@ pub fn run(
     let mut stopping: Option<Instant> = None;
     let mut evidence_due: Option<(Raw, Context, &'static str)> = None;
     let mut last_input_at = now();
+    let resolve_input = |raw| {
+        backend.resolve_input(raw).or_else(|| {
+            counters.dropped.fetch_add(1, Ordering::Relaxed);
+            None
+        })
+    };
     loop {
         if !accepting.load(Ordering::Acquire) && stopping.is_none() {
             if let Some(failure) = hooks.failure_reason() {
@@ -251,13 +264,22 @@ pub fn run(
                 break;
             }
         }
-        let received = queued_raw.take().or_else(|| {
-            if stopping.is_some() {
+        let received = if let Some(raw) = queued_raw.take() {
+            Some(raw)
+        } else {
+            let input = if stopping.is_some() {
                 rx.try_recv().ok()
             } else {
                 rx.recv_timeout(Duration::from_millis(60)).ok()
+            };
+            match input {
+                Some(raw) => match resolve_input(raw) {
+                    Some(raw) => Some(raw),
+                    None => continue,
+                },
+                None => None,
             }
-        });
+        };
         if stopping.is_some() && received.is_none() {
             break;
         }
@@ -282,7 +304,7 @@ pub fn run(
         let ctx = backend.context(raw);
         // One-event lookahead preserves ordering between an in-flight UIA
         // sample and input that arrived while that sample was being read.
-        queued_raw = rx.try_recv().ok();
+        queued_raw = rx.try_recv().ok().and_then(&resolve_input);
         let mut t = timeline.lock().unwrap();
         if t.stopped.is_some() {
             break;
@@ -706,6 +728,144 @@ mod tests {
     use super::*;
     use std::fs;
     pub(super) struct UnavailableBackend;
+    struct QueuedBackend {
+        consumer: thread::ThreadId,
+        resolved: Mutex<Vec<u64>>,
+        readable: bool,
+    }
+    impl Backend for QueuedBackend {
+        fn check_available(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn start(
+            &self,
+            _: SyncSender<Raw>,
+            _: Arc<AtomicBool>,
+            _: Arc<Counters>,
+            _: Vec<u32>,
+        ) -> Result<Box<dyn Listener>, String> {
+            unreachable!("test supplies queued input")
+        }
+        fn resolve_input(&self, raw: Raw) -> Option<Raw> {
+            assert_eq!(thread::current().id(), self.consumer);
+            let mut resolved = self.resolved.lock().unwrap();
+            assert!(
+                !resolved.contains(&raw.at),
+                "verify each input once, including lookahead"
+            );
+            resolved.push(raw.at);
+            // The current window is 1; another window of PID 3 is not equivalent.
+            (raw.window == 1).then_some(raw)
+        }
+        fn current(&self) -> Option<Raw> {
+            None
+        }
+        fn context(&self, raw: Raw) -> Context {
+            assert_eq!((raw.window, raw.focus), (1, 2));
+            Context {
+                safe: true,
+                focus: "edit".into(),
+                value: self
+                    .readable
+                    .then(|| if raw.at == 10 { "" } else { "√" }.into()),
+                ..Default::default()
+            }
+        }
+        fn is_transient(&self, _: Raw) -> bool {
+            false
+        }
+        fn capture(
+            &self,
+            _: Raw,
+            _: &(dyn std::any::Any + Send + Sync),
+            _: Instant,
+            _: &'static str,
+        ) -> Result<Captured, &'static str> {
+            unreachable!("no screenshot proof in this fixture")
+        }
+        fn double_click_settings(&self) -> (u64, i64) {
+            (500, 4)
+        }
+        fn key_metadata(&self, _: Key) -> Value {
+            json!({})
+        }
+    }
+
+    #[test]
+    fn queued_identity_and_option_text_reach_the_session_report() {
+        struct Stopped;
+        impl Listener for Stopped {
+            fn stop(&self) {}
+        }
+        for (readable, failed_identity) in [(true, false), (false, false), (true, true)] {
+            let backend = Arc::new(QueuedBackend {
+                consumer: thread::current().id(),
+                resolved: Mutex::new(Vec::new()),
+                readable,
+            });
+            let (tx, rx) = mpsc::sync_channel(4);
+            thread::spawn(move || {
+                for (at, kind, window) in [
+                    (10, Kind::Focus, 1),
+                    (20, Kind::Key(Key::TextInput, 4), 1),
+                    (30, Kind::Focus, if failed_identity { 9 } else { 1 }),
+                    (40, Kind::Focus, 1),
+                ] {
+                    tx.try_send(Raw {
+                        window,
+                        focus: 2,
+                        pid: 3,
+                        at,
+                        kind,
+                    })
+                    .unwrap();
+                }
+            })
+            .join()
+            .unwrap();
+            assert!(backend.resolved.lock().unwrap().is_empty());
+            let directory = tempfile::tempdir().unwrap();
+            let output = Arc::new(SessionOutput::create(directory.path()).unwrap());
+            let timeline = Arc::new(Mutex::new(timeline()));
+            let evidence = Arc::new(evidence::EvidenceLog::new(
+                PerceptionClientHandle::fixed(
+                    crate::perception_client::PerceptionClient::unavailable(),
+                ),
+                output,
+                backend.clone(),
+            ));
+            run(
+                backend.clone(),
+                rx,
+                Box::new(Stopped),
+                timeline.clone(),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new("requested".into())),
+                Arc::new(Counters::default()),
+                vec![],
+                1,
+                evidence,
+            );
+            assert_eq!(*backend.resolved.lock().unwrap(), [10, 20, 30, 40]);
+            let state = timeline.lock().unwrap().snapshot(0, 100);
+            assert_eq!(state["complete"], readable && !failed_identity);
+            assert_eq!(
+                state["diagnostics"]["dropped_events"],
+                u64::from(failed_identity)
+            );
+            assert_eq!(
+                state["diagnostics"]["text_unavailable"],
+                u64::from(!readable)
+            );
+            let actions = state["actions"].as_array().unwrap();
+            assert_eq!(actions.len(), usize::from(readable));
+            if readable {
+                assert_eq!(actions[0]["actionType"], "typeText");
+                assert_eq!(actions[0]["payload"]["text"], "√");
+                assert_eq!(actions[0]["occurredAtEpochMs"], 20);
+            }
+        }
+    }
     #[test]
     fn listener_failure_is_not_reported_as_requested_stop() {
         struct Failed;
