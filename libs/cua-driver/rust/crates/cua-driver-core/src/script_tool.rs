@@ -82,12 +82,13 @@ pub fn enabled() -> bool {
 
 /// The setting that turned the tool off, if any.
 pub fn disabled_by() -> Option<String> {
-    let config = std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(|home| {
-            std::path::PathBuf::from(home)
-                .join(".cua-driver")
-                .join("config.json")
+    let config = std::env::var_os("CUA_DRIVER_CONFIG_PATH")
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .map(|home| std::path::PathBuf::from(home).join(".cua-driver/config.json"))
         });
     disabled_from(
         std::env::var(DISABLE_ENV).ok().as_deref(),

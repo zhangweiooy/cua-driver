@@ -117,10 +117,13 @@ def test_integrity(bundle, cache):
     return {"integrity": "passed", "negative_cases": 12 if "runtime_dependencies" in config else 11, "startup_without_payload_hashing": "passed", "upstream_model_hash_rejection": "passed", "unicode_path": "passed", "daemon_start_status_stop": "passed"}
 
 
-def test_mcp(bundle, cache):
+def test_mcp(bundle, cache, script_disabled=False):
     config = layout(bundle)
     environment = dict(os.environ, DO_NOT_TRACK="1")
-    environment[config["state_override"]] = str(cache / "mcp-state")
+    state = cache / ("mcp-script-disabled" if script_disabled else "mcp-state")
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "config.json").write_text(json.dumps({"disable_run_script": script_disabled}), encoding="utf-8")
+    environment[config["state_override"]] = str(state)
     process = subprocess.Popen([str(bundle / config["binary"]), "mcp", "--no-overlay"],
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, encoding="utf-8", env=environment)
@@ -160,12 +163,13 @@ def test_mcp(bundle, cache):
         listed = request(2, "tools/list", {})
         names = {tool["name"] for tool in listed["tools"]}
         assert {"get_window_state", "parse_visual_regions", "start_recording", "list_windows"} <= names, names
+        assert ("run_script" not in names) == script_disabled, names
         assert not ({"install_extension", "remove_extension", "update_extension"} & names), names
         windows = request(3, "tools/call", {"name": "list_windows", "arguments": {}})
         assert not windows.get("isError"), windows
         configured = request(4, "tools/call", {"name": "set_config", "arguments": {"key": "max_image_dimension", "value": 640}})
         assert not configured.get("isError"), configured
-        saved = json.loads((cache / "mcp-state/config.json").read_text(encoding="utf-8"))
+        saved = json.loads((state / "config.json").read_text(encoding="utf-8"))
         assert saved["max_image_dimension"] == 640, saved
         # A second read proves the same live stdio connection remains usable.
         again = request(5, "tools/list", {})
@@ -189,6 +193,8 @@ def main():
     cache = Path(__file__).resolve().parent.parent / ".cache" / "tests"
     cache.mkdir(parents=True, exist_ok=True)
     results = {**test_integrity(bundle, cache), **test_mcp(bundle, cache)}
+    test_mcp(bundle, cache, script_disabled=True)
+    results["operator_script_opt_out"] = "passed"
     results["not_run"] = ["Windows 1903", "host input", "full Chinese OCR quality", "human teaching"]
     (cache / "package-results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
     print(json.dumps(results, ensure_ascii=False))
