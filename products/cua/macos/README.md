@@ -35,6 +35,34 @@ coalescing, OCR, evidence queues and files. Tap disablement records loss and
 stops rather than silently claiming complete input. Teardown invalidates the
 run-loop source and Mach port before releasing callback state.
 
+The listen-only tap uses Apple's
+[`AnnotatedSession`](https://developer.apple.com/documentation/coregraphics/cgeventtaplocation/cgannotatedsessioneventtap)
+location, where session events have been annotated for delivery to an application.
+The tap callback reads event fields and uses the existing 256-entry nonblocking
+queue; it does not enumerate windows or query Spaces/AX. The shared consumer
+verifies each queued identity once (including lookahead), retaining the original
+window ID, target PID and timestamp. Mouse/scroll bindings use the event's
+`mouseEventWindowUnderMousePointerThatCanHandleThisEvent` field; keyboard bindings
+read [`NSEvent.windowNumber`](https://developer.apple.com/documentation/appkit/nsevent/windownumber)
+from the equivalent event created by
+[`eventWithCGEvent:`](https://developer.apple.com/documentation/appkit/nsevent/init%28cgevent%3A%29-4igjn).
+The keyboard callback creates a temporary event object in an autorelease pool;
+it does not query AX, windows, Spaces or the current foreground application.
+
+Missing/zero bindings, changed or closed windows, PID mismatches and inputs older
+than 250 ms count as dropped. The consumer never fills in a window from current
+focus, including another window of the same application. No additional queue,
+worker or polling loop is added. Native callback latency and global keyboard
+event window-number availability still need Mac measurement. If a provider does
+not supply this binding, its input is omitted with an incomplete report, rather
+than attributed using current focus. Host tests cover A/B switches, closing A to
+reveal B, missing bindings, queue bounds and consumer-only verification.
+
+Option/Shift+Option printable and dead keys carry text-input intent; AX values
+remain the authority for committed text. Command/Control shortcuts and Option
+navigation retain shortcut semantics. The pure normalization/queue tests also
+run on Windows via `cargo test --locked --release -p platform-macos --lib`.
+
 Accessibility and Input Monitoring are required for teaching. A missing grant
 returns a specific permission error; no automatic permission bypass or synthetic
 input is used. Missing Screen Recording permission skips image evidence. Native
@@ -56,13 +84,19 @@ not establish macOS compilation or operation. The following must run on a Mac:
    and Screen Recording grants using the real bundle identity.
 2. Run the common package/CLI/MCP suite; exercise teaching start/status/stop,
    explicit owner sessions, mutual exclusion, timeout, disconnect and cancellation.
-3. Verify Chinese IME composition/selection/cancel, Cmd+V, rapid control changes,
+3. Verify Chinese IME composition/selection/cancel, Cmd+V, Option+V (`√`),
+   Shift+Option, Option dead-key composition/cancel, rapid control changes,
    virtual AX controls and double-click. In particular, confirm provider AXValue
    reflects committed text, not marked composition, before accepting IME support.
 4. Verify password redaction and target-checked crops on Retina/mixed-DPI screens,
    OCR evidence, moved/resized windows, lock/sleep and resource release.
 5. Install the resulting package and collect native startup/model/inference and
    process-cleanup evidence. Windows results do not satisfy these rows.
+6. Compare tap callback latency with many windows/Spaces and delayed WindowServer
+   responses; verify bounded overflow, stop/timeout cleanup and loss reporting.
+   Verify event window bindings for global keys, modifier changes, clicks and
+   scrolling, including rapid switches between two windows of one application
+   and closing a window to expose another at the same coordinates.
 
 Until these pass, P3 is an unvalidated native implementation and macOS P4 is
 not complete. The user explicitly deferred native acceptance for lack of a Mac.

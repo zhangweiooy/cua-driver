@@ -47,6 +47,8 @@ pub mod recording_hooks;
 pub mod session;
 #[cfg(target_os = "macos")]
 pub mod teaching;
+#[cfg(any(target_os = "macos", test))]
+mod teaching_input;
 #[cfg(target_os = "macos")]
 pub mod terminal;
 #[cfg(target_os = "macos")]

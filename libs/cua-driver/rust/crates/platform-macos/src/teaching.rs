@@ -2,6 +2,7 @@
 //! Event-tap ownership/teardown and off-callback AX reads follow the Screenpipe
 //! implementation inspected at 46e35e0fd55039aa4218866d62060b07f7c3f5e8.
 //! See products/cua/macos/README.md for native acceptance still required.
+use super::teaching_input::{enqueue, key, verify_input};
 use crate::ax::bindings::*;
 use core_foundation::{
     base::{CFEqual, CFHash, CFRelease, CFTypeRef, TCFType},
@@ -12,11 +13,15 @@ use core_foundation::{
     },
 };
 use core_graphics::event::{
-    CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType, EventField,
+    CGEvent, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+    EventField,
 };
 use cua_driver_core::teaching::{
     now, Backend, Captured, Context, Counters, Key, Kind, Listener, Raw,
 };
+use foreign_types::ForeignType;
+use objc2::{msg_send, rc::autoreleasepool, ClassType};
+use objc2_app_kit::NSEvent;
 use serde_json::{json, Value};
 use std::{
     sync::{
@@ -62,6 +67,29 @@ fn ax_timeout() {
             CFRelease(system as CFTypeRef);
         }
     });
+}
+
+// Read the binding already in the event, never the current foreground window.
+// A global event without a window number remains unbound and is counted as loss.
+fn event_window(kind: CGEventType, event: &CGEvent) -> u64 {
+    let number = match kind {
+        CGEventType::LeftMouseDown
+        | CGEventType::RightMouseDown
+        | CGEventType::OtherMouseDown
+        | CGEventType::ScrollWheel => event.get_integer_value_field(
+            EventField::MOUSE_EVENT_WINDOW_UNDER_MOUSE_POINTER_THAT_CAN_HANDLE_THIS_EVENT,
+        ),
+        CGEventType::KeyDown | CGEventType::FlagsChanged => autoreleasepool(|_| unsafe {
+            // objc2-app-kit 0.2 omits this CGEvent factory binding. The object is
+            // autoreleased; its scalar windowNumber is copied before pool drain.
+            let native: *mut NSEvent = msg_send![NSEvent::class(), eventWithCGEvent: event.as_ptr().cast::<std::ffi::c_void>()];
+            native
+                .as_ref()
+                .map_or(0, |event| event.windowNumber() as i64)
+        }),
+        _ => 0,
+    };
+    u32::try_from(number).map(u64::from).unwrap_or(0)
 }
 
 fn identity(kind: Kind) -> Option<Raw> {
@@ -217,86 +245,6 @@ fn prove(raw: Raw, proof: &Proof) -> Result<(), &'static str> {
     Ok(())
 }
 
-// Native key codes are confined to this adapter. Letter keys used as shortcuts
-// are normalized; other printable keys only trigger an AX value observation.
-fn key(code: i64, modifiers: u8) -> Key {
-    if code == 9 && modifiers & 8 != 0 {
-        return Key::Paste;
-    }
-    let letter = match code {
-        0 => 'A',
-        1 => 'S',
-        2 => 'D',
-        3 => 'F',
-        4 => 'H',
-        5 => 'G',
-        6 => 'Z',
-        7 => 'X',
-        8 => 'C',
-        9 => 'V',
-        11 => 'B',
-        12 => 'Q',
-        13 => 'W',
-        14 => 'E',
-        15 => 'R',
-        16 => 'Y',
-        17 => 'T',
-        31 => 'O',
-        32 => 'U',
-        34 => 'I',
-        35 => 'P',
-        37 => 'L',
-        38 => 'J',
-        40 => 'K',
-        45 => 'N',
-        46 => 'M',
-        18 => '1',
-        19 => '2',
-        20 => '3',
-        21 => '4',
-        23 => '5',
-        22 => '6',
-        26 => '7',
-        28 => '8',
-        25 => '9',
-        29 => '0',
-        49 => ' ',
-        _ => '\0',
-    };
-    if letter != '\0' {
-        return Key::Character(letter);
-    }
-    match code {
-        36 | 76 => Key::Named("Enter"),
-        48 => Key::Named("Tab"),
-        51 => Key::Named("Backspace"),
-        53 => Key::Named("Escape"),
-        54..=63 => Key::Modifier,
-        115 => Key::Named("Home"),
-        116 => Key::Named("PageUp"),
-        117 => Key::Named("Delete"),
-        119 => Key::Named("End"),
-        121 => Key::Named("PageDown"),
-        123 => Key::Named("Left"),
-        124 => Key::Named("Right"),
-        125 => Key::Named("Down"),
-        126 => Key::Named("Up"),
-        122 => Key::Named("F1"),
-        120 => Key::Named("F2"),
-        99 => Key::Named("F3"),
-        118 => Key::Named("F4"),
-        96 => Key::Named("F5"),
-        97 => Key::Named("F6"),
-        98 => Key::Named("F7"),
-        100 => Key::Named("F8"),
-        101 => Key::Named("F9"),
-        109 => Key::Named("F10"),
-        103 => Key::Named("F11"),
-        111 => Key::Named("F12"),
-        _ => Key::Text,
-    }
-}
-
 struct TapGuard<'a> {
     tap: CGEventTap<'a>,
     source: CFRunLoopSource,
@@ -368,7 +316,8 @@ impl Backend for MacosBackend {
                 let losses = counters.clone();
                 let tap_failed = failure.clone();
                 let tap = CGEventTap::new(
-                    CGEventTapLocation::Session,
+                    // Observe after the system annotates the receiving app/window.
+                    CGEventTapLocation::AnnotatedSession,
                     CGEventTapPlacement::TailAppendEventTap,
                     CGEventTapOptions::ListenOnly,
                     vec![
@@ -402,15 +351,18 @@ impl Backend for MacosBackend {
                         let point = event.location();
                         let x = point.x.round() as i32;
                         let y = point.y.round() as i32;
-                        let send = |kind| {
-                            if let Some(raw) = identity(kind) {
-                                if !excluded.contains(&raw.pid) && tx.try_send(raw).is_err() {
-                                    losses.dropped.fetch_add(1, Ordering::Relaxed);
-                                }
-                            } else {
-                                losses.dropped.fetch_add(1, Ordering::Relaxed);
-                            }
-                        };
+                        // Read only fields already in the event. Native window/AX
+                        // queries run after dequeue, never on the tap's deadline.
+                        let pid = u32::try_from(
+                            event.get_integer_value_field(EventField::EVENT_TARGET_UNIX_PROCESS_ID),
+                        )
+                        .unwrap_or(0);
+                        if pid != 0 && excluded.contains(&pid) {
+                            return None;
+                        }
+                        let at = now();
+                        let window = event_window(kind, event);
+                        let send = |kind| enqueue(&tx, &losses, kind, window, pid, at);
                         if matches!(kind, CGEventType::OtherMouseDown)
                             && event.get_integer_value_field(EventField::MOUSE_EVENT_BUTTON_NUMBER)
                                 != 2
@@ -524,6 +476,10 @@ impl Backend for MacosBackend {
             }
         }
     }
+    fn resolve_input(&self, event: Raw) -> Option<Raw> {
+        verify_input(event, now(), || identity(event.kind))
+    }
+
     fn current(&self) -> Option<Raw> {
         identity(Kind::Focus)
     }
