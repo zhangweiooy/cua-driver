@@ -138,7 +138,7 @@ def main():
                 return c
             first, second = client(), client()
             names = {t["name"] for t in first.request("tools/list", {})["tools"]}
-            assert {"start_teaching","get_teaching_state","stop_teaching"} <= names
+            assert {"start_teaching","get_teaching_state","stop_teaching","run_steps","run_script"} <= names
             first.call("start_teaching", {"session_id":"native-one","max_seconds":10})
             first.call("start_teaching", {"session_id":"duplicate"}, "teaching_already_active")
             second.call("start_teaching", {"session_id":"independent"})
@@ -149,6 +149,11 @@ def main():
             time.sleep(.2)
             arguments = {"pid":os.getpid(),"window_id":int(fixture.hwnd),"text":"互斥验证","delay_ms":10}
             first.call("type_text", arguments, "teaching_active")
+            # New 0.35 entry points and its hidden batch alias must use the same
+            # runtime admission gate before dispatching any nested automation.
+            for tool in ("run_steps", "run_actions"):
+                first.call(tool, {"steps":[{"tool":"type_text","args":arguments}]}, "teaching_active")
+            first.call("run_script", {"script":"return 7;"}, "teaching_active")
             first.call("list_windows", {})
             actual = C.create_unicode_buffer(256)
             fixture.u.GetWindowTextW(fixture.edit, actual, len(actual))

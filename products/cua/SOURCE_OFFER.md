@@ -22,7 +22,7 @@ an installer whose source attachment is absent.
 
 Upstream source locations:
 
-- https://github.com/trycua/cua/tree/cua-driver-rs-v0.34.1
+- https://github.com/trycua/cua/tree/cua-driver-rs-v0.35.2
 - https://github.com/trycua/cua/tree/cua-perception-v0.2.1
 - https://github.com/trycua/cua/releases/tag/cua-perception-v0.2.1
 

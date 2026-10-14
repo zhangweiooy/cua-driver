@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "product": "cua",
-  "product_version": "0.4.0-dev.12",
+  "product_version": "0.4.0-dev.13",
   "repository": "https://github.com/trycua/cua.git",
   "driver": {
-    "version": "0.34.1",
-    "tag": "cua-driver-rs-v0.34.1",
-    "commit": "0c69d9a2c8abbb5051a2df4a23f0fa166d5385dc",
-    "source_sha256": "c5464aa4919bf4d744b5307638c3619ddb63a53545dc8cc4dbe157f9cb6ace49",
+    "version": "0.35.2",
+    "tag": "cua-driver-rs-v0.35.2",
+    "commit": "ad694f82aaaa12e67257e4510837fc1f6cfc9484",
+    "source_sha256": "6d8eaadc9818f237de718b348e6f4708cc8a36f1258f7035394aeacc3ac78135",
     "source_format": "git archive --format=tar RELEASE_TAG",
-    "cargo_lock_sha256": "a36ac042e8f9426c28fac1119a4b06cdb34b36b221b2e85fb9c4fbeb094b1cfe",
+    "cargo_lock_sha256": "e0d4e430c767fe9168309031cb1b0f406c862dbd66b6212f382f5b5fec3caca8",
     "rust_toolchain": "1.97.1"
   },
   "perception": {
@@ -84,8 +84,8 @@
         ]
       },
       "driver": {
-        "asset": "cua-driver-rs-0.34.1-windows-x86_64-binary.zip",
-        "sha256": "021bc2e5330c80a6c5e2c347c305fafbd4defe195d6282e0d20436f2f13c19bb"
+        "asset": "cua-driver-rs-0.35.2-windows-x86_64-binary.zip",
+        "sha256": "0eb49cb651986d2888294484be84c25a33e1cd31396e57c457f501358decdd4e"
       },
       "perception": {
         "asset": "cua-perception-0.2.1-x86_64-pc-windows-msvc.tar.gz",
@@ -109,8 +109,8 @@
       "app_name": "Cua",
       "bundle_id": "com.zhangweiooy.cua",
       "driver": {
-        "asset": "cua-driver-rs-0.34.1-darwin-arm64.tar.gz",
-        "sha256": "83ffed8d41ef0f133976d594b02eb86dd59ef4a8721396b6e25078a59c6056d6"
+        "asset": "cua-driver-rs-0.35.2-darwin-arm64.tar.gz",
+        "sha256": "4922ddd042d3b2197a9c034926472c1d6e0c3daa55fff7f146beb720948cbdd7"
       },
       "perception": {
         "asset": "cua-perception-0.2.1-aarch64-apple-darwin.tar.gz",

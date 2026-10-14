@@ -28,9 +28,9 @@ baseline. HWND-less controls retain a consistent text identity, separate from
 click coalescing. Screenshot proof uses UIA RuntimeId/password/geometry only.
 
 ```powershell
-python products/cua/tests/test_package.py products/cua/out/cua-win-0.4.0-dev.12.dist
+python products/cua/tests/test_package.py products/cua/out/cua-win-0.4.0-dev.13.dist
 ./products/cua/windows/verify-teaching.ps1 `
-  -Bundle products/cua/out/cua-win-0.4.0-dev.12.dist -Python python -AllowDesktop
+  -Bundle products/cua/out/cua-win-0.4.0-dev.13.dist -Python python -AllowDesktop
 ```
 
 Run desktop fixtures sequentially. They create disposable windows and require

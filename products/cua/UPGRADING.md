@@ -9,6 +9,7 @@ after verifying component tags, commits, release asset digests and Cargo.lock.
 | `cua-driver-contract/src/teaching.rs`, `lib.rs` | Three shared tools | Names, args, both platforms, returned action/evidence semantics |
 | `cua-driver-core/src/teaching/` | Sessions, timeline, evidence, output | No platform crate dependency; keep owner/exclusion/stop and text regressions |
 | Core `tool.rs`, `authorization.rs`, `lib.rs` | Runtime admission and existing permission adapters | Tool normalization, read-only cleanup, output directory authorization |
+| Core `script_tool.rs` | Product config path for the operator's script opt-out | Honor `CUA_DRIVER_CONFIG_PATH`; batch/script entry points retain teaching exclusion |
 | `platform-windows/src/teaching.rs`, `lib.rs` | Hooks/UIA/WGC | IME, paste, focus boundary, HWND-less and double-click native fixtures |
 | `platform-macos/src/teaching.rs`, `lib.rs` | Event tap/AX/window capture | Native build, TCC denial/revocation, IME/marked text, Retina crops, tap/CF cleanup |
 | Driver `product.rs`, `build.rs`, Cargo feature | Shared target layout and fixed client | Compile both with and without `cua-product`; target triples and resource contract |

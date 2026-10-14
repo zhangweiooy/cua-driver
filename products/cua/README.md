@@ -5,6 +5,9 @@ CLI/MCP tools, default bundled vision and Chinese OCR configuration. OS APIs
 are confined to the platform backends. Python is a build/test dependency only;
 the installed product contains native binaries, models, runtime libraries and notices.
 
+Current development candidate: **0.4.0-dev.13**, based on Driver **0.35.2**
+and independently pinned Perception **0.2.1**. Chinese model sources are unchanged.
+
 - [Teaching contract](TEACHING.md)
 - [Windows build, identity and validation](windows/README.md)
 - [macOS build, permissions and native acceptance](macos/README.md)
