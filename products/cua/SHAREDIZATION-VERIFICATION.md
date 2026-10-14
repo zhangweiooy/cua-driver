@@ -1,5 +1,8 @@
 # Shared product verification — 2026-10-14
 
+Historical dev.12 baseline. For the subsequent Driver 0.35.2/dev.13 upgrade,
+see [the upgrade verification record](UPGRADE-0.35.2.md).
+
 This records the current development boundary, not a dual-platform release
 certification. The user confirmed that no Mac is available and authorized
 finishing the locally verifiable work first.

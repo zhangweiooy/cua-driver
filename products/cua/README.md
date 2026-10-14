@@ -13,6 +13,7 @@ and independently pinned Perception **0.2.1**. Chinese model sources are unchang
 - [macOS build, permissions and native acceptance](macos/README.md)
 - [Baseline and downstream integration points](BASELINE.md)
 - [Upgrade checklist](UPGRADING.md)
+- [Driver 0.35.2 upgrade and verification](UPGRADE-0.35.2.md)
 - [Sharedization verification and remaining native gaps](SHAREDIZATION-VERIFICATION.md)
 - [Model provenance](MODEL_SOURCES.md) and [corresponding source](SOURCE_OFFER.md)
 
